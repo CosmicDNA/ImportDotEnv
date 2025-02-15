@@ -31,17 +31,17 @@ Install-Module -Name ImportDotEnv -Scope CurrentUser
 
 1. Clone this repository:
 ```powershell
-   git clone https://github.com/CosmicDNA/ImportDotEnv.git
+  git clone https://github.com/CosmicDNA/ImportDotEnv.git
 ```
 
 2. Navigate to the module directory:
 ```powershell
-   cd ImportDotEnv
+  cd ImportDotEnv
 ```
 
 3. Import the module:
 ```powershell
-   Import-Module .\ImportDotEnv.psm1
+  Import-Module .\ImportDotEnv.psm1
 ```
 
 ## Usage
@@ -57,16 +57,14 @@ Import-DotEnv
 This will:
 
 1. Search for .env files in the current directory and its parent directories.
-
 2. Load the environment variables from the found .env files.
-
 3. Display a colorized output of the loaded variables.
 
 ### Change Directory and Auto-Load .env Files
 The module overrides the Set-Location cmdlet to automatically load .env files when you change directories:
 
 ```powershell
-Set-Location -Path "C:\Projects\MyProject"
+cd MyProject
 ```
 
 This will:
@@ -135,7 +133,7 @@ Load .env file .\testme\.env:
 ```
 
 > [!TIP]
-> There is a hyperlink on the environment variables to vscode with the reference to the line where it is set
+> There is a hyperlink on the environment variables to Visual Studio Code with the reference to the line where it is set for the loaded variables.
 
 
 ## Unload .env Files
@@ -156,6 +154,8 @@ Unload .env file .\testme\.env:
 ↳ Unsetting environment variable: VAR1
 ```
 
+> [!TIP]
+> There is a hyperlink on the environment variables to Visual Studio Code with the reference to the line where it is set for the unloaded variables as well.
 
 Check for .env Files
 ```powershell
