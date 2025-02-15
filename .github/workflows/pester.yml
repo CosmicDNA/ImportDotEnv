@@ -21,4 +21,4 @@ jobs:
         run: Install-Module -Name Pester -Force -SkipPublisherCheck -Scope CurrentUser
 
       - name: Run Pester tests
-        run: powershell -ExecutionPolicy Bypass -Command "Invoke-Pester -Path .\ImportDotEnv\Tests\ -Output Detailed"
+        run: powershell -ExecutionPolicy Bypass -Command "Invoke-Pester -Path .\Tests\ -Output Detailed"
