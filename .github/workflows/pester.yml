@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - main
+      - development  # Add the development branch here
   pull_request:
     branches:
       - main
+      - development  # Add the development branch here
 
 jobs:
   test:
@@ -16,7 +18,7 @@ jobs:
         uses: actions/checkout@v2
 
       - name: Install Pester
-        run: Install-Module -Name Pester -Force -SkipPublisherCheck
+        run: Install-Module -Name Pester -Force -SkipPublisherCheck -Scope CurrentUser
 
       - name: Run Pester tests
-        run: Invoke-Pester -Path .\ImportDotEnv\Tests\
+        run: powershell -ExecutionPolicy Bypass -Command "Invoke-Pester -Path .\ImportDotEnv\Tests\ -Output Detailed"
