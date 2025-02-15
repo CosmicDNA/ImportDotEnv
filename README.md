@@ -27,6 +27,15 @@ You can install the module directly from the [PowerShell Gallery](https://www.po
 Install-Module -Name ImportDotEnv -Scope CurrentUser
 ```
 
+Once installed open your $PROfILE with the command `code $PROFILE` and add:
+
+```powershell
+Import-Module ImportDotEnv
+
+# Set the initial environment variables
+Import-DotEnv
+```
+
 ### Manual Installation
 
 1. Clone this repository:
