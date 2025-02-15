@@ -1,0 +1,22 @@
+name: Pester Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Install Pester
+        run: Install-Module -Name Pester -Force -SkipPublisherCheck
+
+      - name: Run Pester tests
+        run: Invoke-Pester -Path .\ImportDotEnv\Tests\
