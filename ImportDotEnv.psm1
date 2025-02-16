@@ -106,8 +106,10 @@ function Format-EnvFile {
     # Read the file content once
     $content = Get-Content $EnvFile
 
+    $lineNumber = 0
     # Process the .env file
     foreach ($line in $content) {
+      $lineNumber++
       # Remove comments and trailing whitespace
       $line = $line -replace '\s*#.*', ''
       # Match lines that have key=value
@@ -125,15 +127,16 @@ function Format-EnvFile {
           $actionText = "Unsetting"
         }
 
+        $fileUrl = "vscode://file/${EnvFile}:$lineNumber"
         # Add the environment variable action to the output with color and hyperlink
-        $hyperlinkStart = "`e]8;;$EnvFile`e\"
+        $hyperlinkStart = "`e]8;;$fileUrl`e\"
         $hyperlinkEnd = "`e]8;;`e\"
         # $output += "↳ $actionText environment variable: `e[${color}m$hyperlinkStart$variableName$hyperlinkEnd`e[0m`n"
 
         if ($PSVersionTable.PSVersion.Major -ge 7) {
           $variableString = "$hyperlinkStart$variableName$hyperlinkEnd"
         } else {
-          $variableString = "$variableName"
+          $variableString = "$variableName (L: $lineNumber)"
         }
 
         Write-Host "$script:itemiser $actionText environment variable: " -NoNewline
