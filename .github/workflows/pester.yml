@@ -17,10 +17,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
 
-      - name: Set TEMP environment variable
-        run: |
-          echo "TEMP=$env:TEMP" >> $env:GITHUB_ENV
-
       - name: Install Pester
         run: Install-Module -Name Pester -Force -SkipPublisherCheck -Scope CurrentUser
 

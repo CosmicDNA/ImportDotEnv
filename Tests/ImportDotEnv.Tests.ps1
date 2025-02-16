@@ -2,7 +2,7 @@ Describe "Import-DotEnv" {
   Context "Loading environment variables" {
       It "Loads environment variables from a .env file" {
           # Create a temporary .env file
-          $tempDir = New-Item -ItemType Directory -Path "$env:TEMP\ImportDotEnvTest_$(Get-Random)"
+          $tempDir = New-Item -ItemType Directory -Path "$testdrive\ImportDotEnvTest_$(Get-Random)"
           $envFilePath = Join-Path $tempDir.FullName ".env"
 
           Set-Content -Path $envFilePath -Value "TEST_VAR=123"
@@ -16,7 +16,7 @@ Describe "Import-DotEnv" {
           }
           finally {
               # Reset the working directory
-              Set-Location -Path $env:TEMP
+              Set-Location -Path $testdrive
 
               # Clean up
               Remove-Item -Path $tempDir.FullName -Recurse -Force -ErrorAction SilentlyContinue
@@ -28,7 +28,7 @@ Describe "Import-DotEnv" {
   Context "Unloading environment variables" {
       It "Unloads environment variables from a .env file" {
           # Create a temporary .env file
-          $tempDir = New-Item -ItemType Directory -Path "$env:TEMP\ImportDotEnvTest_$(Get-Random)"
+          $tempDir = New-Item -ItemType Directory -Path "$testdrive\ImportDotEnvTest_$(Get-Random)"
           $envFilePath = Join-Path $tempDir.FullName ".env"
 
           Set-Content -Path $envFilePath -Value "TEST_VAR=123"
@@ -41,7 +41,7 @@ Describe "Import-DotEnv" {
               $env:TEST_VAR | Should -Be "123"
 
               # Unload the .env file, so reset the working directory
-              Set-Location -Path $env:TEMP
+              Set-Location -Path $testdrive
 
               # Assert that TEST_VAR is unset (null)
               $env:TEST_VAR | Should -BeNullOrEmpty
@@ -57,7 +57,7 @@ Describe "Import-DotEnv" {
   Context "Handling multiple .env files" {
       It "Loads and unloads multiple .env files correctly" {
           # Create a temporary directory with two .env files
-          $tempDir = New-Item -ItemType Directory -Path "$env:TEMP\ImportDotEnvTest_$(Get-Random)"
+          $tempDir = New-Item -ItemType Directory -Path "$testdrive\ImportDotEnvTest_$(Get-Random)"
           $envFilePath1 = Join-Path $tempDir.FullName ".env"
           $subDir = New-Item -ItemType Directory -Path "$tempDir\subdir"
           $envFilePath2 = Join-Path $subDir.FullName ".env"
@@ -88,7 +88,7 @@ Describe "Import-DotEnv" {
               $env:TEST_VAR2 | Should -BeNullOrEmpty
 
               # Unload the second .env file
-              Set-Location -Path $env:TEMP
+              Set-Location -Path $testdrive
 
               # Assert that both TEST_VAR1 and TEST_VAR2 are unset
               $env:TEST_VAR1 | Should -BeNullOrEmpty
@@ -105,14 +105,14 @@ Describe "Import-DotEnv" {
 
   Context "Edge cases" {
       It "Does not throw an error if the .env file does not exist" {
-          $tempDir = New-Item -ItemType Directory -Path "$env:TEMP\ImportDotEnvTest_$(Get-Random)"
+          $tempDir = New-Item -ItemType Directory -Path "$testdrive\ImportDotEnvTest_$(Get-Random)"
           try {
               # Change to the directory containing the .env file
               { Set-Location -Path $tempDir } | Should -Not -Throw
           }
           finally {
               # Reset the working directory
-              Set-Location -Path $env:TEMP
+              Set-Location -Path $testdrive
 
               # Clean up
               Remove-Item -Path $tempDir.FullName -Recurse -Force -ErrorAction SilentlyContinue
@@ -121,7 +121,7 @@ Describe "Import-DotEnv" {
 
       It "Handles empty .env files correctly" {
           # Create a temporary .env file with no content
-          $tempDir = New-Item -ItemType Directory -Path "$env:TEMP\ImportDotEnvTest_$(Get-Random)"
+          $tempDir = New-Item -ItemType Directory -Path "$testdrive\ImportDotEnvTest_$(Get-Random)"
           $envFilePath = Join-Path $tempDir.FullName ".env"
 
           Set-Content -Path $envFilePath -Value ""
@@ -138,7 +138,7 @@ Describe "Import-DotEnv" {
           }
           finally {
               # Reset the working directory
-              Set-Location -Path $env:TEMP
+              Set-Location -Path $testdrive
 
               # Clean up
               Remove-Item -Path $tempDir.FullName -Recurse -Force -ErrorAction SilentlyContinue
