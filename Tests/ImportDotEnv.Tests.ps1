@@ -1,148 +1,97 @@
 Describe "Import-DotEnv" {
-  Context "Loading environment variables" {
-      It "Loads environment variables from a .env file" {
-          # Create a temporary .env file
-          $tempDir = New-Item -ItemType Directory -Path "$testdrive\ImportDotEnvTest_$(Get-Random)"
-          $envFilePath = Join-Path $tempDir.FullName ".env"
+    BeforeAll {
+        Import-Module .\ImportDotEnv.psm1
+        # Create a temporary directory in TestDrive
+        $tempDir = New-Item -ItemType Directory -Path "$TestDrive\ImportDotEnvTest"
+    }
+    Context "With TEST_VAR=123 within .env" {
+        BeforeAll {
+            $envFilePath = Join-Path $tempDir.FullName ".env"
+            Set-Content -Path $envFilePath -Value "TEST_VAR=123"
+        }
+        It "Loads environment variables from a .env file" {
+            # Change to the directory containing the .env file
+            Set-Location -Path $tempDir
 
-          Set-Content -Path $envFilePath -Value "TEST_VAR=123"
+            # Assert that TEST_VAR is set to "123"
+            $env:TEST_VAR | Should -Be "123"
+        }
+        It "Unloads environment variables from a .env file" {
+            # Change to the directory containing the .env file
+            Set-Location -Path $tempDir
 
-          try {
-              # Change to the directory containing the .env file
-              Set-Location -Path $tempDir
+            # Assert that TEST_VAR is set to "123"
+            $env:TEST_VAR | Should -Be "123"
 
-              # Assert that TEST_VAR is set to "123"
-              $env:TEST_VAR | Should -Be "123"
-          }
-          finally {
-              # Reset the working directory
-              Set-Location -Path $testdrive
+            # Unload the .env file, so reset the working directory
+            Set-Location -Path $TestDrive
 
-              # Clean up
-              Remove-Item -Path $tempDir.FullName -Recurse -Force -ErrorAction SilentlyContinue
-              Remove-Item -Path Env:\TEST_VAR -Force -ErrorAction SilentlyContinue
-          }
-      }
-  }
+            # Assert that TEST_VAR is unset (null)
+            $env:TEST_VAR | Should -BeNullOrEmpty
+        }
+        Context "Handling multiple .env files" {
+            BeforeAll {
+                # Create another temporary .env file
+                $subDir = New-Item -ItemType Directory -Path "$tempDir\subdir"
+                $envFilePath2 = Join-Path $subDir.FullName ".env"
+                Set-Content -Path $envFilePath2 -Value "TEST_VAR2=456"
+            }
+            It "Loads and unloads multiple .env files correctly" {
+                # Change to the directory containing the .env files
+                Set-Location -Path $tempDir
 
-  Context "Unloading environment variables" {
-      It "Unloads environment variables from a .env file" {
-          # Create a temporary .env file
-          $tempDir = New-Item -ItemType Directory -Path "$testdrive\ImportDotEnvTest_$(Get-Random)"
-          $envFilePath = Join-Path $tempDir.FullName ".env"
+                # Assert that TEST_VAR1 is set to "123" and TEST_VAR2 is not set
+                $env:TEST_VAR | Should -Be "123"
+                $env:TEST_VAR2 | Should -BeNullOrEmpty
 
-          Set-Content -Path $envFilePath -Value "TEST_VAR=123"
+                # Load the second .env file
+                Set-Location -Path $subDir
 
-          try {
-              # Change to the directory containing the .env file
-              Set-Location -Path $tempDir
+                # Assert that both TEST_VAR1 and TEST_VAR2 are set
+                $env:TEST_VAR | Should -Be "123"
+                $env:TEST_VAR2 | Should -Be "456"
 
-              # Assert that TEST_VAR is set to "123"
-              $env:TEST_VAR | Should -Be "123"
+                # Unload the first .env file
+                Set-Location -Path $tempDir
 
-              # Unload the .env file, so reset the working directory
-              Set-Location -Path $testdrive
+                # Assert that TEST_VAR1 is unset and TEST_VAR2 is still set
+                $env:TEST_VAR | Should -Be "123"
+                $env:TEST_VAR2 | Should -BeNullOrEmpty
 
-              # Assert that TEST_VAR is unset (null)
-              $env:TEST_VAR | Should -BeNullOrEmpty
-          }
-          finally {
-              # Clean up
-              Remove-Item -Path $tempDir.FullName -Recurse -Force -ErrorAction SilentlyContinue
-              Remove-Item -Path Env:\TEST_VAR -Force -ErrorAction SilentlyContinue
-          }
-      }
-  }
+                # Unload the second .env file
+                Set-Location -Path $TestDrive
 
-  Context "Handling multiple .env files" {
-      It "Loads and unloads multiple .env files correctly" {
-          # Create a temporary directory with two .env files
-          $tempDir = New-Item -ItemType Directory -Path "$testdrive\ImportDotEnvTest_$(Get-Random)"
-          $envFilePath1 = Join-Path $tempDir.FullName ".env"
-          $subDir = New-Item -ItemType Directory -Path "$tempDir\subdir"
-          $envFilePath2 = Join-Path $subDir.FullName ".env"
+                # Assert that both TEST_VAR1 and TEST_VAR2 are unset
+                $env:TEST_VAR | Should -BeNullOrEmpty
+                $env:TEST_VAR2 | Should -BeNullOrEmpty
+            }
+        }
+    }
 
-          Set-Content -Path $envFilePath1 -Value "TEST_VAR1=123"
-          Set-Content -Path $envFilePath2 -Value "TEST_VAR2=456"
+    Context "Edge cases" {
+        It "Does not throw an error if the .env file does not exist" {
+            # Change to the directory containing the .env file
+            { Set-Location -Path $tempDir } | Should -Not -Throw
+        }
 
-          try {
-              # Change to the directory containing the .env files
-              Set-Location -Path $tempDir
+        It "Handles empty .env files correctly" {
+            # Create a temporary .env file with no content
+            $envFilePath = Join-Path $tempDir.FullName ".env"
 
-              # Assert that TEST_VAR1 is set to "123" and TEST_VAR2 is not set
-              $env:TEST_VAR1 | Should -Be "123"
-              $env:TEST_VAR2 | Should -BeNullOrEmpty
+            Set-Content -Path $envFilePath -Value ""
 
-              # Load the second .env file
-              Set-Location -Path $subDir
+            # Change to the directory containing the .env file
+            Set-Location -Path $tempDir
 
-              # Assert that both TEST_VAR1 and TEST_VAR2 are set
-              $env:TEST_VAR1 | Should -Be "123"
-              $env:TEST_VAR2 | Should -Be "456"
+            # Test the function
+            { Import-DotEnv -Path $envFilePath } | Should -Not -Throw
 
-              # Unload the first .env file
-              Set-Location -Path $tempDir
+            # Assert that no environment variables are set
+            $env:TEST_VAR | Should -BeNullOrEmpty
+        }
+    }
 
-              # Assert that TEST_VAR1 is unset and TEST_VAR2 is still set
-              $env:TEST_VAR1 | Should -Be "123"
-              $env:TEST_VAR2 | Should -BeNullOrEmpty
-
-              # Unload the second .env file
-              Set-Location -Path $testdrive
-
-              # Assert that both TEST_VAR1 and TEST_VAR2 are unset
-              $env:TEST_VAR1 | Should -BeNullOrEmpty
-              $env:TEST_VAR2 | Should -BeNullOrEmpty
-          }
-          finally {
-              # Clean up
-              Remove-Item -Path $tempDir.FullName -Recurse -Force -ErrorAction SilentlyContinue
-              Remove-Item -Path Env:\TEST_VAR1 -Force -ErrorAction SilentlyContinue
-              Remove-Item -Path Env:\TEST_VAR2 -Force -ErrorAction SilentlyContinue
-          }
-      }
-  }
-
-  Context "Edge cases" {
-      It "Does not throw an error if the .env file does not exist" {
-          $tempDir = New-Item -ItemType Directory -Path "$testdrive\ImportDotEnvTest_$(Get-Random)"
-          try {
-              # Change to the directory containing the .env file
-              { Set-Location -Path $tempDir } | Should -Not -Throw
-          }
-          finally {
-              # Reset the working directory
-              Set-Location -Path $testdrive
-
-              # Clean up
-              Remove-Item -Path $tempDir.FullName -Recurse -Force -ErrorAction SilentlyContinue
-          }
-      }
-
-      It "Handles empty .env files correctly" {
-          # Create a temporary .env file with no content
-          $tempDir = New-Item -ItemType Directory -Path "$testdrive\ImportDotEnvTest_$(Get-Random)"
-          $envFilePath = Join-Path $tempDir.FullName ".env"
-
-          Set-Content -Path $envFilePath -Value ""
-
-          try {
-              # Change to the directory containing the .env file
-              Set-Location -Path $tempDir
-
-              # Test the function
-              { Import-DotEnv -Path $envFilePath } | Should -Not -Throw
-
-              # Assert that no environment variables are set
-              $env:TEST_VAR | Should -BeNullOrEmpty
-          }
-          finally {
-              # Reset the working directory
-              Set-Location -Path $testdrive
-
-              # Clean up
-              Remove-Item -Path $tempDir.FullName -Recurse -Force -ErrorAction SilentlyContinue
-          }
-      }
-  }
+    AfterAll {
+        Remove-Module ImportDotEnv
+    }
 }
