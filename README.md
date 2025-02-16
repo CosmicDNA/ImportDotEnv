@@ -24,7 +24,7 @@ A PowerShell module for managing `.env` files, allowing you to load and unload e
 You can install the module directly from the [PowerShell Gallery](https://www.powershellgallery.com/packages/ImportDotEnv):
 
 ```powershell
-Install-Module -Name ImportDotEnv -Scope CurrentUser
+Install-Module -Name ImportDotEnv -Scope CurrentUser -AllowClobber
 ```
 
 Once installed open your $PROfILE with the command `code $PROFILE` and add:
