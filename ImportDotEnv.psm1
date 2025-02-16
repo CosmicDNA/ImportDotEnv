@@ -129,15 +129,11 @@ function Format-EnvFile {
 
         $fileUrl = "vscode://file/${EnvFile}:$lineNumber"
         # Add the environment variable action to the output with color and hyperlink
-        $hyperlinkStart = "`e]8;;$fileUrl`e\"
-        $hyperlinkEnd = "`e]8;;`e\"
+        $e = [char] 27
+        $hyperlinkStart = "$e]8;;$fileUrl$e\"
+        $hyperlinkEnd = "$e]8;;$e\"
         # $output += "↳ $actionText environment variable: `e[${color}m$hyperlinkStart$variableName$hyperlinkEnd`e[0m`n"
-
-        if ($PSVersionTable.PSVersion.Major -ge 7) {
-          $variableString = "$hyperlinkStart$variableName$hyperlinkEnd"
-        } else {
-          $variableString = "$variableName (L: $lineNumber)"
-        }
+        $variableString = "$hyperlinkStart$variableName$hyperlinkEnd"
 
         Write-Host "$script:itemiser $actionText environment variable: " -NoNewline
         Write-Host "$variableString" -ForegroundColor "$color"
