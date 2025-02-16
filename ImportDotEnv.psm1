@@ -2,18 +2,25 @@
 $script:previousEnvFiles = @()
 
 # Track the previous working directory
-$script:previousWorkingDirectory = Get-Location
+$script:previousWorkingDirectory = (Get-Location).Path
 
 function Get-EnvFilesUpstream {
   param (
-    [string]$Directory = (Get-Location).Path
+    [string]$Directory = "."
   )
+
+  # Resolve the full path of the directory
+  try {
+    $resolvedPath = Resolve-Path -Path $Directory -ErrorAction Stop
+  } catch {
+    $resolvedPath = (Get-Location).Path
+  }
 
   # Initialize an array to store .env file paths
   $envFiles = @()
 
   # Start from the current directory and move up to the root
-  $currentDir = $Directory
+  $currentDir = $resolvedPath
   while ($currentDir) {
     $envPath = Join-Path $currentDir ".env"
     if (Test-Path $envPath -PathType Leaf) {
@@ -36,7 +43,7 @@ function Get-EnvFilesUpstream {
 function Format-EnvFilePath {
   param (
     [string]$Path,
-    [string]$BasePath = (Get-Location).Path
+    [string]$BasePath
   )
 
   # Resolve the relative path
@@ -136,11 +143,18 @@ function Format-EnvFiles {
 
 function Import-DotEnv {
   param (
-    [string]$Path = ".env"
+    [string]$Path = "."
   )
 
+  # Resolve the full path of the directory
+  try {
+    $resolvedPath = Resolve-Path -Path $Path -ErrorAction Stop
+  } catch {
+    $resolvedPath = (Get-Location).Path
+  }
+
   # Get the current list of .env files
-  $currentEnvFiles = Get-EnvFilesUpstream
+  $currentEnvFiles = Get-EnvFilesUpstream -Directory $resolvedPath
 
   $previousEnvFilesSet = [System.Collections.Generic.HashSet[string]]::new()
   foreach ($file in $script:previousEnvFiles) {
@@ -160,16 +174,16 @@ function Import-DotEnv {
   $addedEnvFiles = $currentEnvFiles | Where-Object { -not $previousEnvFilesSet.Contains($_) }
 
   # Process removed .env files (relative to current path)
-  Format-EnvFiles -EnvFiles $removedEnvFiles -BasePath (Get-Location).Path -Action "Unload" -Message "removed" -ForegroundColor Yellow
+  Format-EnvFiles -EnvFiles $removedEnvFiles -BasePath $resolvedPath -Action "Unload" -Message "removed" -ForegroundColor Yellow
 
   # Process added .env files (relative to previous path)
-  Format-EnvFiles -EnvFiles $addedEnvFiles -BasePath $script:previousWorkingDirectory.Path -Action "Load" -Message "added" -ForegroundColor Cyan
+  Format-EnvFiles -EnvFiles $addedEnvFiles -BasePath $script:previousWorkingDirectory -Action "Load" -Message "added" -ForegroundColor Cyan
 
   # Update the previous list with the current list
   $script:previousEnvFiles = $currentEnvFiles
 
   # Update the previous working directory
-  $script:previousWorkingDirectory = Get-Location
+  $script:previousWorkingDirectory = $resolvedPath
 }
 
 function Set-Location {
@@ -181,4 +195,4 @@ function Set-Location {
   Import-DotEnv
 }
 
-Export-ModuleMember -Function Get-EnvFilesUpstream, Format-EnvFilePath, Format-EnvFile, Format-EnvFiles, Import-DotEnv, Set-Location
+Export-ModuleMember -Function Get-EnvFilesUpstream, Import-DotEnv, Set-Location
