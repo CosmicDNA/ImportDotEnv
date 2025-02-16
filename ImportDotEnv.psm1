@@ -1,8 +1,32 @@
+function Get-RelativePath {
+  param (
+      [string]$Path,
+      [string]$BasePath
+  )
+
+  $absolutePath = [System.IO.Path]::GetFullPath($Path)
+  $absoluteBasePath = [System.IO.Path]::GetFullPath($BasePath)
+
+  $uri = New-Object System.Uri($absolutePath)
+  $baseUri = New-Object System.Uri($absoluteBasePath)
+
+  $relativeUri = $baseUri.MakeRelativeUri($uri)
+  $relativePath = [System.Uri]::UnescapeDataString($relativeUri.ToString())
+
+  return $relativePath
+}
+
 # Track previously loaded .env files
 $script:previousEnvFiles = @()
 
 # Track the previous working directory
 $script:previousWorkingDirectory = (Get-Location).Path
+
+if ($PSVersionTable.PSVersion.Major -ge 7) {
+  $script:itemiser = "↳"
+} else {
+  $script:itemiser = "-"
+}
 
 function Get-EnvFilesUpstream {
   param (
@@ -47,7 +71,11 @@ function Format-EnvFilePath {
   )
 
   # Resolve the relative path
-  $relativePath = Resolve-Path $Path -Relative -RelativeBasePath $BasePath
+
+  # The RelativeBasePath parameter is available in PowerShell 7.4 and later only
+  # $relativePath = Resolve-Path $Path -Relative -RelativeBasePath $BasePath
+  $relativePath = Get-RelativePath -Path $Path -BasePath $BasePath
+
   # Extract the core path (directory containing the .env file)
   $corePath = Split-Path $relativePath -Parent
   # Remove the initial .\ from the relative path
@@ -73,9 +101,7 @@ function Format-EnvFile {
     # Format the path
     $formattedPath = Format-EnvFilePath -Path $EnvFile -BasePath $BasePath
 
-    # Add the action message to the output with color
-    $colorCode = if ($ForegroundColor -eq "Cyan") { "36" } elseif ($ForegroundColor -eq "Yellow") { "33" } else { "37" } # Default to white
-    $output += "`e[${colorCode}m$Action .env file ${formattedPath}:`e[0m`n"
+    Write-Host "$Action .env file ${formattedPath}:" -ForegroundColor $ForegroundColor
 
     # Read the file content once
     $content = Get-Content $EnvFile
@@ -91,18 +117,27 @@ function Format-EnvFile {
         if ($Action -eq "Load") {
           $variableValue = $matches[2].Trim()
           [System.Environment]::SetEnvironmentVariable($variableName, $variableValue)
-          $color = "32" # Green
+          $color = "Green"
           $actionText = "Setting"
         } else {
           [System.Environment]::SetEnvironmentVariable($variableName, $null)
-          $color = "31" # Red
+          $color = "Red"
           $actionText = "Unsetting"
         }
 
         # Add the environment variable action to the output with color and hyperlink
         $hyperlinkStart = "`e]8;;$EnvFile`e\"
         $hyperlinkEnd = "`e]8;;`e\"
-        $output += "↳ $actionText environment variable: `e[${color}m$hyperlinkStart$variableName$hyperlinkEnd`e[0m`n"
+        # $output += "↳ $actionText environment variable: `e[${color}m$hyperlinkStart$variableName$hyperlinkEnd`e[0m`n"
+
+        if ($PSVersionTable.PSVersion.Major -ge 7) {
+          $variableString = "$hyperlinkStart$variableName$hyperlinkEnd"
+        } else {
+          $variableString = "$variableName"
+        }
+
+        Write-Host "$script:itemiser $actionText environment variable: " -NoNewline
+        Write-Host "$variableString" -ForegroundColor "$color"
       }
     }
   }
@@ -124,20 +159,18 @@ function Format-EnvFiles {
     # Initialize a string to store the full output
     $listOutput = "The following .env files were ${Message}:`n"
 
-    $processingOutput = ""
     # Collect formatted paths
     foreach ($envFile in $EnvFiles) {
       $formattedPath = Format-EnvFilePath -Path $envFile -BasePath $BasePath
-      $listOutput += "↳ $formattedPath`n"
-      $envFileOutput = Format-EnvFile -EnvFile $envFile -BasePath $BasePath -Action $Action -ForegroundColor $ForegroundColor
-      $processingOutput += "$envFileOutput`n"
+      $listOutput += "$script:itemiser $formattedPath`n"
     }
 
     # Display the full output at once with colors
     Write-Host $listOutput -ForegroundColor DarkGray
 
-    # Display the full output at once with colors
-    Write-Host $processingOutput
+    foreach ($envFile in $EnvFiles) {
+      Format-EnvFile -EnvFile $envFile -BasePath $BasePath -Action $Action -ForegroundColor $ForegroundColor
+    }
   }
 }
 

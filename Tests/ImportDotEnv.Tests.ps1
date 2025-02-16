@@ -9,8 +9,7 @@ Describe "Import-DotEnv" {
             $envFilePath = Join-Path $tempDir.FullName ".env"
             Set-Content -Path $envFilePath -Value "TEST_VAR=123"
         }
-        It "Loads environment variables from a .env file" {
-            # Change to the directory containing the .env file
+        It "Loads environment variables from a .env file"{
             Set-Location -Path $tempDir
 
             # Assert that TEST_VAR is set to "123"
