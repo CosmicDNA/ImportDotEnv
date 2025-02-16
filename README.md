@@ -15,6 +15,12 @@ A PowerShell module for managing `.env` files, allowing you to load and unload e
 - **Colorized Output**: Provides colorized and formatted output for better visibility of loaded/unloaded variables.
 - **Cross-Platform**: Works on Windows, macOS, and Linux.
 
+## Preview
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/6dbc49e9-3561-4e3a-87b9-9d4df208fcac" alt="ImportDotEnv Usage" />
+</p>
+
 ---
 
 ## Installation
