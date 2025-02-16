@@ -9,6 +9,7 @@ A PowerShell module for managing `.env` files, allowing you to load and unload e
 
 ## Features
 
+- **VS Code hyperlink to env var definition**: Automatically sets a hyperlink on the terminal to each environment variable defintion.
 - **Load `.env` Files**: Automatically load environment variables from `.env` files in the current or parent directories.
 - **Unload `.env` Files**: Unload previously loaded environment variables when switching directories.
 - **Track Changes**: Track and manage changes to `.env` files as you navigate through directories.
