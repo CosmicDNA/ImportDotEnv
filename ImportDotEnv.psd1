@@ -12,7 +12,7 @@
 RootModule = '.\ImportDotEnv.psm1'
 
 # Version number of this module.
-ModuleVersion = '0.0.5'
+ModuleVersion = '0.0.6'
 
 # Supported PSEditions
 # CompatiblePSEditions = @()
@@ -21,10 +21,10 @@ ModuleVersion = '0.0.5'
 GUID = 'f682ccbb-7511-43ee-b94b-f3fc2c5406a6'
 
 # Author of this module
-Author = 'Cosmic DNA'
+Author = 'Daniel de Souza'
 
 # Company or vendor of this module
-CompanyName = 'Unknown'
+CompanyName = 'Cosmic DNA'
 
 # Copyright statement for this module
 Copyright = '(c) Cosmic DNA. All rights reserved.'
