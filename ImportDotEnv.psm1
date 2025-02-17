@@ -1,17 +1,37 @@
 function Get-RelativePath {
   param (
-      [string]$Path,
-      [string]$BasePath
+    [string]$Path,
+    [string]$BasePath
   )
 
+  # Cache the directory separator
+  $separator = [System.IO.Path]::DirectorySeparatorChar
+
+  # Resolve absolute paths
   $absolutePath = [System.IO.Path]::GetFullPath($Path)
   $absoluteBasePath = [System.IO.Path]::GetFullPath($BasePath)
 
-  $uri = New-Object System.Uri($absolutePath)
-  $baseUri = New-Object System.Uri($absoluteBasePath)
+  # Split paths into segments
+  $pathSegments = $absolutePath -split [regex]::Escape($separator)
+  $basePathSegments = $absoluteBasePath -split [regex]::Escape($separator)
 
-  $relativeUri = $baseUri.MakeRelativeUri($uri)
-  $relativePath = [System.Uri]::UnescapeDataString($relativeUri.ToString())
+  $commonLength = (
+    0..([math]::Min($pathSegments.Length, $basePathSegments.Length) - 1)
+  ).Where({ $pathSegments[$_] -eq $basePathSegments[$_] }).Count
+
+
+  # Calculate the relative path using list comprehension
+  if ($commonLength -eq 0) {
+    # No common base path, return the full path
+    return $absolutePath
+  }
+  else {
+    # Use list comprehension to build the relative path
+    $relativePath = @(".") + ($pathSegments[$commonLength..($pathSegments.Length - 1)])
+  }
+
+  # Join the segments into a relative path
+  $relativePath = $relativePath -join $separator
 
   return $relativePath
 }
@@ -30,7 +50,8 @@ function Get-EnvFilesUpstream {
   # Resolve the full path of the directory
   try {
     $resolvedPath = Resolve-Path -Path $Directory -ErrorAction Stop
-  } catch {
+  }
+  catch {
     $resolvedPath = (Get-Location).Path
   }
 
@@ -67,7 +88,6 @@ function Format-EnvFilePath {
   # Resolve the relative path
 
   # The RelativeBasePath parameter is available in PowerShell 7.4 and later only
-  # $relativePath = Resolve-Path $Path -Relative -RelativeBasePath $BasePath
   $relativePath = Get-RelativePath -Path $Path -BasePath $BasePath
 
   # Extract the core path (directory containing the .env file)
@@ -114,14 +134,16 @@ function Format-EnvFile {
 
         if ($Action -eq "Load") {
           $variableValue = $matches[2].Trim()
-          [System.Environment]::SetEnvironmentVariable($variableName, $variableValue)
+          $valueToSet = $variableValue
           $color = "Green"
           $actionText = "Setting"
-        } else {
-          [System.Environment]::SetEnvironmentVariable($variableName, $null)
+        }
+        else {
+          $valueToSet = $null
           $color = "Red"
           $actionText = "Unsetting"
         }
+        [System.Environment]::SetEnvironmentVariable($variableName, $valueToSet)
 
         $fileUrl = "vscode://file/${EnvFile}:$lineNumber"
         # Add the environment variable action to the output with color and hyperlink
@@ -175,7 +197,8 @@ function Import-DotEnv {
   # Resolve the full path of the directory
   try {
     $resolvedPath = Resolve-Path -Path $Path -ErrorAction Stop
-  } catch {
+  }
+  catch {
     $resolvedPath = (Get-Location).Path
   }
 
@@ -191,7 +214,6 @@ function Import-DotEnv {
   foreach ($file in $currentEnvFiles) {
     [void]$currentEnvFilesSet.Add($file)
   }
-
 
   # Compare with the previous list to detect removed .env files
   $removedEnvFiles = $script:previousEnvFiles | Where-Object { -not $currentEnvFilesSet.Contains($_) }
