@@ -79,6 +79,10 @@ function Get-EnvFilesUpstream {
   return $envFiles
 }
 
+
+$script:e = [char] 27
+$script:itemiser = [char]0x21B3
+
 function Format-EnvFilePath {
   param (
     [string]$Path,
@@ -95,7 +99,7 @@ function Format-EnvFilePath {
   # Remove the initial .\ from the relative path
   $corePath = $corePath -replace '^\.\\', ''
   # Format the core path in bold
-  $formattedPath = $relativePath -replace ([regex]::Escape($corePath), "`e[1m$corePath`e[22m")
+  $formattedPath = $relativePath -replace ([regex]::Escape($corePath), "$script:e[1m$corePath$script:e[22m")
 
   return $formattedPath
 }
@@ -121,8 +125,6 @@ function Format-EnvFile {
     $content = Get-Content $EnvFile
 
     $lineNumber = 0
-    $itemiser = [char]0x21B3
-    $e = [char] 27
     # Process the .env file
     foreach ($line in $content) {
       $lineNumber++
@@ -147,11 +149,11 @@ function Format-EnvFile {
 
         $fileUrl = "vscode://file/${EnvFile}:$lineNumber"
         # Add the environment variable action to the output with color and hyperlink
-        $hyperlinkStart = "$e]8;;$fileUrl$e\"
-        $hyperlinkEnd = "$e]8;;$e\"
+        $hyperlinkStart = "$script:e]8;;$fileUrl$script:e\"
+        $hyperlinkEnd = "$script:e]8;;$script:e\"
         $variableString = "$hyperlinkStart$variableName$hyperlinkEnd"
 
-        Write-Host "$itemiser $actionText environment variable: " -NoNewline
+        Write-Host "$script:itemiser $actionText environment variable: " -NoNewline
         Write-Host "$variableString" -ForegroundColor "$color"
       }
     }
