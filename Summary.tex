@@ -1,0 +1,363 @@
+\documentclass[a4paper,landscape,10pt]{article}
+\usepackage[paper=a4paper,landscape,left=20mm,right=20mm,top=20mm,bottom=20mm]{geometry}
+\usepackage{longtable}
+\usepackage{fancyhdr}
+\usepackage[pdftex]{color}
+\usepackage{colortbl}
+\definecolor{green}{rgb}{0.04,0.68,0.04}
+\definecolor{orange}{rgb}{0.97,0.65,0.12}
+\definecolor{red}{rgb}{0.75,0.04,0.04}
+\definecolor{gray}{rgb}{0.86,0.86,0.86}
+
+\usepackage[pdftex,
+            colorlinks=true, linkcolor=red, urlcolor=green, citecolor=red,%
+            raiselinks=true,%
+            bookmarks=true,%
+            bookmarksopenlevel=1,%
+            bookmarksopen=true,%
+            bookmarksnumbered=true,%
+            hyperindex=true,% 
+            plainpages=false,% correct hyperlinks
+            pdfpagelabels=true%,% view TeX pagenumber in PDF reader
+            %pdfborder={0 0 0.5}
+            ]{hyperref}
+
+\hypersetup{pdftitle={Coverage Report},
+            pdfauthor={ReportGenerator - 5.4.4.0}
+           }
+
+\pagestyle{fancy}
+\fancyhead[LE,LO]{\leftmark}
+\fancyhead[R]{\thepage}
+\fancyfoot[C]{ReportGenerator - 5.4.4.0}
+
+\begin{document}
+
+\setcounter{secnumdepth}{-1}
+\section{Summary}
+\begin{longtable}[l]{ll}
+\textbf{Generated on:} & 2/18/2025 - 4:02:39 AM\\
+\textbf{Coverage date:} & 2/18/2025 - 4:01:42 AM\\
+\textbf{Parser:} & JaCoCo\\
+\textbf{Assemblies:} & 1\\
+\textbf{Classes:} & 1\\
+\textbf{Files:} & 1\\
+\textbf{Covered lines:} & 85\\
+\textbf{Uncovered lines:} & 2\\
+\textbf{Coverable lines:} & 87\\
+\textbf{Total lines:} & 248\\
+\textbf{Line coverage:} & 97.7\% (85 of 87)\\
+\textbf{Covered branches:} & 0\\
+\textbf{Total branches:} & 0\\
+\textbf{Covered methods:} & 8\\
+\textbf{Fully covered methods:} & 0\\
+\textbf{Total methods:} & 8\\
+\textbf{Method coverage:} & 100\% (8 of 8)\\
+\textbf{Full method coverage:} & 0\% (0 of 8)\\
+\end{longtable}
+\section{Coverage}
+\begin{longtable}[l]{|l|r|r|r|r|r|r|r|}
+\hline
+\textbf{Name} & \textbf{Covered} & \textbf{Uncovered} & \textbf{Coverable} & \textbf{Total} & \textbf{Line coverage} & \textbf{Branch coverage} & \textbf{Method coverage}\\
+\hline
+\textbf{ImportDotEnv} & \textbf{85} & \textbf{2} & \textbf{87} & \textbf{248} & \textbf{97.7\%} & \textbf{} & \textbf{100\%}\\
+\hline
+ImportDotEnv/ImportDotEnv & 85 & 2 & 87 & 248 & 97.7\% &  & 100\%\\
+\hline
+\end{longtable}
+\newpage
+\section{ImportDotEnv/ImportDotEnv}
+\subsection{Summary}
+\begin{longtable}[l]{ll}
+\textbf{Class:} & ImportDotEnv/ImportDotEnv\\
+\textbf{Assembly:} & ImportDotEnv\\
+\textbf{File(s):} & \begin{minipage}[t]{12cm}{.\textbackslash ImportDotEnv.psm1}\end{minipage} \\
+\textbf{Covered lines:} & 85\\
+\textbf{Uncovered lines:} & 2\\
+\textbf{Coverable lines:} & 87\\
+\textbf{Total lines:} & 248\\
+\textbf{Line coverage:} & 97.7\% (85 of 87)\\
+\textbf{Covered branches:} & 0\\
+\textbf{Total branches:} & 0\\
+\textbf{Covered methods:} & 8\\
+\textbf{Fully covered methods:} & 0\\
+\textbf{Total methods:} & 8\\
+\textbf{Method coverage:} & 100\% (8 of 8)\\
+\textbf{Full method coverage:} & 0\% (0 of 8)\\
+\end{longtable}
+\subsection{Metrics}
+\begin{longtable}[l]{|l|r|r|}
+\hline
+\textbf{Method} & \textbf{Branch coverage} & \textbf{Line coverage}\\
+\hline
+\textbf{Get-RelativePath()} & - & 100\%\\
+\hline
+\textbf{$<$script$>$()} & - & 100\%\\
+\hline
+\textbf{Get-EnvFilesUpstream} & - & 91.67\%\\
+\hline
+\textbf{Format-EnvFilePath()} & - & 100\%\\
+\hline
+\textbf{Format-EnvFile()} & - & 100\%\\
+\hline
+\textbf{Format-EnvFiles()} & - & 100\%\\
+\hline
+\textbf{Import-DotEnv()} & - & 93.33\%\\
+\hline
+\textbf{Set-Location()} & - & 100\%\\
+\hline
+\end{longtable}
+\subsection{File(s)}
+\subsubsection{.\textbackslash ImportDotEnv.psm1}
+\begin{longtable}[l]{lrrll}
+\textbf{} & \textbf{\#} & \textbf{Line} & \textbf{} & \textbf{Line coverage}\\
+\cellcolor{gray} &  & \verb~1~ & & \verb~function Get-RelativePath {~\\
+\cellcolor{gray} &  & \verb~2~ & & \verb~  param (~\\
+\cellcolor{gray} &  & \verb~3~ & & \verb~    [string]$Path,~\\
+\cellcolor{gray} &  & \verb~4~ & & \verb~    [string]$BasePath~\\
+\cellcolor{gray} &  & \verb~5~ & & \verb~  )~\\
+\cellcolor{gray} &  & \verb~6~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~7~ & & \verb~  # Cache the directory separator~\\
+\cellcolor{green} & 1 & \verb~8~ & & \verb~  $separator = [System.IO.Path]::DirectorySeparatorChar~\\
+\cellcolor{gray} &  & \verb~9~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~10~ & & \verb~  # Resolve absolute paths~\\
+\cellcolor{green} & 1 & \verb~11~ & & \verb~  $absolutePath = [System.IO.Path]::GetFullPath($Path)~\\
+\cellcolor{green} & 1 & \verb~12~ & & \verb~  $absoluteBasePath = [System.IO.Path]::GetFullPath($BasePath)~\\
+\cellcolor{gray} &  & \verb~13~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~14~ & & \verb~  # Split paths into segments~\\
+\cellcolor{green} & 1 & \verb~15~ & & \verb~  $pathSegments = $absolutePath -split [regex]::Escape($separator)~\\
+\cellcolor{green} & 1 & \verb~16~ & & \verb~  $basePathSegments = $absoluteBasePath -split [regex]::Escape($separator)~\\
+\cellcolor{gray} &  & \verb~17~ & & \verb~~\\
+\cellcolor{green} & 1 & \verb~18~ & & \verb~  $commonLength = (~\\
+\cellcolor{green} & 1 & \verb~19~ & & \verb~    0..([math]::Min($pathSegments.Length, $basePathSegments.Length) - 1)~\\
+\cellcolor{green} & 1 & \verb~20~ & & \verb~  ).Where({ $pathSegments[$_] -eq $basePathSegments[$_] }).Count~\\
+\cellcolor{gray} &  & \verb~21~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~22~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~23~ & & \verb~  # Calculate the relative path using list comprehension~\\
+\cellcolor{green} & 1 & \verb~24~ & & \verb~  if ($commonLength -eq 0) {~\\
+\cellcolor{gray} &  & \verb~25~ & & \verb~    # No common base path, return the full path~\\
+\cellcolor{green} & 1 & \verb~26~ & & \verb~    return $absolutePath~\\
+\cellcolor{gray} &  & \verb~27~ & & \verb~  }~\\
+\cellcolor{gray} &  & \verb~28~ & & \verb~  else {~\\
+\cellcolor{gray} &  & \verb~29~ & & \verb~    # Use list comprehension to build the relative path~\\
+\cellcolor{green} & 1 & \verb~30~ & & \verb~    $relativePath = @(".") + ($pathSegments[$commonLength..($pathSegments.Length - 1)])~\\
+\cellcolor{gray} &  & \verb~31~ & & \verb~  }~\\
+\cellcolor{gray} &  & \verb~32~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~33~ & & \verb~  # Join the segments into a relative path~\\
+\cellcolor{green} & 1 & \verb~34~ & & \verb~  $relativePath = $relativePath -join $separator~\\
+\cellcolor{gray} &  & \verb~35~ & & \verb~~\\
+\cellcolor{green} & 1 & \verb~36~ & & \verb~  return $relativePath~\\
+\cellcolor{gray} &  & \verb~37~ & & \verb~}~\\
+\cellcolor{gray} &  & \verb~38~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~39~ & & \verb~# Track previously loaded .env files~\\
+\cellcolor{green} & 1 & \verb~40~ & & \verb~$script:previousEnvFiles = @()~\\
+\cellcolor{gray} &  & \verb~41~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~42~ & & \verb~# Track the previous working directory~\\
+\cellcolor{green} & 1 & \verb~43~ & & \verb~$script:previousWorkingDirectory = (Get-Location).Path~\\
+\cellcolor{gray} &  & \verb~44~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~45~ & & \verb~function Get-EnvFilesUpstream {~\\
+\cellcolor{gray} &  & \verb~46~ & & \verb~  param (~\\
+\cellcolor{gray} &  & \verb~47~ & & \verb~    [string]$Directory = "."~\\
+\cellcolor{gray} &  & \verb~48~ & & \verb~  )~\\
+\cellcolor{gray} &  & \verb~49~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~50~ & & \verb~  # Resolve the full path of the directory~\\
+\cellcolor{gray} &  & \verb~51~ & & \verb~  try {~\\
+\cellcolor{green} & 1 & \verb~52~ & & \verb~    $resolvedPath = Resolve-Path -Path $Directory -ErrorAction Stop~\\
+\cellcolor{gray} &  & \verb~53~ & & \verb~  }~\\
+\cellcolor{gray} &  & \verb~54~ & & \verb~  catch {~\\
+\cellcolor{red} & 0 & \verb~55~ & & \verb~    $resolvedPath = (Get-Location).Path~\\
+\cellcolor{gray} &  & \verb~56~ & & \verb~  }~\\
+\cellcolor{gray} &  & \verb~57~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~58~ & & \verb~  # Initialize an array to store .env file paths~\\
+\cellcolor{green} & 1 & \verb~59~ & & \verb~  $envFiles = @()~\\
+\cellcolor{gray} &  & \verb~60~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~61~ & & \verb~  # Start from the current directory and move up to the root~\\
+\cellcolor{green} & 1 & \verb~62~ & & \verb~  $currentDir = $resolvedPath~\\
+\cellcolor{green} & 1 & \verb~63~ & & \verb~  while ($currentDir) {~\\
+\cellcolor{green} & 1 & \verb~64~ & & \verb~    $envPath = Join-Path $currentDir ".env"~\\
+\cellcolor{green} & 1 & \verb~65~ & & \verb~    if (Test-Path $envPath -PathType Leaf) {~\\
+\cellcolor{gray} &  & \verb~66~ & & \verb~      # Add the .env file to the array~\\
+\cellcolor{green} & 1 & \verb~67~ & & \verb~      $envFiles += $envPath~\\
+\cellcolor{gray} &  & \verb~68~ & & \verb~    }~\\
+\cellcolor{gray} &  & \verb~69~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~70~ & & \verb~    # Move to the parent directory~\\
+\cellcolor{green} & 1 & \verb~71~ & & \verb~    $parentDir = Split-Path $currentDir -Parent~\\
+\cellcolor{green} & 1 & \verb~72~ & & \verb~    if ($parentDir -eq $currentDir) {~\\
+\cellcolor{gray} &  & \verb~73~ & & \verb~      # Stop if we've reached the root~\\
+\cellcolor{gray} &  & \verb~74~ & & \verb~      break~\\
+\cellcolor{gray} &  & \verb~75~ & & \verb~    }~\\
+\cellcolor{green} & 1 & \verb~76~ & & \verb~    $currentDir = $parentDir~\\
+\cellcolor{gray} &  & \verb~77~ & & \verb~  }~\\
+\cellcolor{gray} &  & \verb~78~ & & \verb~~\\
+\cellcolor{green} & 1 & \verb~79~ & & \verb~  return $envFiles~\\
+\cellcolor{gray} &  & \verb~80~ & & \verb~}~\\
+\cellcolor{gray} &  & \verb~81~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~82~ & & \verb~~\\
+\cellcolor{green} & 1 & \verb~83~ & & \verb~$script:e = [char] 27~\\
+\cellcolor{green} & 1 & \verb~84~ & & \verb~$script:itemiser = [char]0x21B3~\\
+\cellcolor{gray} &  & \verb~85~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~86~ & & \verb~function Format-EnvFilePath {~\\
+\cellcolor{gray} &  & \verb~87~ & & \verb~  param (~\\
+\cellcolor{gray} &  & \verb~88~ & & \verb~    [string]$Path,~\\
+\cellcolor{gray} &  & \verb~89~ & & \verb~    [string]$BasePath~\\
+\cellcolor{gray} &  & \verb~90~ & & \verb~  )~\\
+\cellcolor{gray} &  & \verb~91~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~92~ & & \verb~  # Resolve the relative path~\\
+\cellcolor{gray} &  & \verb~93~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~94~ & & \verb~  # The RelativeBasePath parameter is available in PowerShell 7.4 and later only~\\
+\cellcolor{green} & 1 & \verb~95~ & & \verb~  $relativePath = Get-RelativePath -Path $Path -BasePath $BasePath~\\
+\cellcolor{gray} &  & \verb~96~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~97~ & & \verb~  # Extract the core path (directory containing the .env file)~\\
+\cellcolor{green} & 1 & \verb~98~ & & \verb~  $corePath = Split-Path $relativePath -Parent~\\
+\cellcolor{gray} &  & \verb~99~ & & \verb~  # Remove the initial .\ from the relative path~\\
+\cellcolor{green} & 1 & \verb~100~ & & \verb~  $corePath = $corePath -replace '^\.\\', ''~\\
+\cellcolor{gray} &  & \verb~101~ & & \verb~  # Format the core path in bold~\\
+\cellcolor{green} & 1 & \verb~102~ & & \verb~  $formattedPath = $relativePath -replace ([regex]::Escape($corePath), "$script:e[1m$corePath$script:e[22m")~\\
+\cellcolor{gray} &  & \verb~103~ & & \verb~~\\
+\cellcolor{green} & 1 & \verb~104~ & & \verb~  return $formattedPath~\\
+\cellcolor{gray} &  & \verb~105~ & & \verb~}~\\
+\cellcolor{gray} &  & \verb~106~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~107~ & & \verb~function Format-EnvFile {~\\
+\cellcolor{gray} &  & \verb~108~ & & \verb~  param (~\\
+\cellcolor{gray} &  & \verb~109~ & & \verb~    [string]$EnvFile,~\\
+\cellcolor{gray} &  & \verb~110~ & & \verb~    [string]$BasePath,~\\
+\cellcolor{gray} &  & \verb~111~ & & \verb~    [string]$Action, # "Load" or "Unload"~\\
+\cellcolor{gray} &  & \verb~112~ & & \verb~    [string]$ForegroundColor # Color for the action message~\\
+\cellcolor{gray} &  & \verb~113~ & & \verb~  )~\\
+\cellcolor{gray} &  & \verb~114~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~115~ & & \verb~  # Initialize a string to store the output~\\
+\cellcolor{green} & 1 & \verb~116~ & & \verb~  $output = ""~\\
+\cellcolor{gray} &  & \verb~117~ & & \verb~~\\
+\cellcolor{green} & 1 & \verb~118~ & & \verb~  if (Test-Path $EnvFile -PathType Leaf) {~\\
+\cellcolor{gray} &  & \verb~119~ & & \verb~    # Format the path~\\
+\cellcolor{green} & 1 & \verb~120~ & & \verb~    $formattedPath = Format-EnvFilePath -Path $EnvFile -BasePath $BasePath~\\
+\cellcolor{gray} &  & \verb~121~ & & \verb~~\\
+\cellcolor{green} & 1 & \verb~122~ & & \verb~    Write-Host "$Action .env file ${formattedPath}:" -ForegroundColor $ForegroundColor~\\
+\cellcolor{gray} &  & \verb~123~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~124~ & & \verb~    # Read the file content once~\\
+\cellcolor{green} & 1 & \verb~125~ & & \verb~    $content = Get-Content $EnvFile~\\
+\cellcolor{gray} &  & \verb~126~ & & \verb~~\\
+\cellcolor{green} & 1 & \verb~127~ & & \verb~    $lineNumber = 0~\\
+\cellcolor{gray} &  & \verb~128~ & & \verb~    # Process the .env file~\\
+\cellcolor{green} & 1 & \verb~129~ & & \verb~    foreach ($line in $content) {~\\
+\cellcolor{green} & 1 & \verb~130~ & & \verb~      $lineNumber++~\\
+\cellcolor{gray} &  & \verb~131~ & & \verb~      # Remove comments and trailing whitespace~\\
+\cellcolor{green} & 1 & \verb~132~ & & \verb~      $line = $line -replace '\s*#.*', ''~\\
+\cellcolor{gray} &  & \verb~133~ & & \verb~      # Match lines that have key=value~\\
+\cellcolor{green} & 1 & \verb~134~ & & \verb~      if ($line -match '^(.*)=(.*)$') {~\\
+\cellcolor{green} & 1 & \verb~135~ & & \verb~        $variableName = $matches[1].Trim()~\\
+\cellcolor{gray} &  & \verb~136~ & & \verb~~\\
+\cellcolor{green} & 1 & \verb~137~ & & \verb~        if ($Action -eq "Load") {~\\
+\cellcolor{green} & 1 & \verb~138~ & & \verb~          $variableValue = $matches[2].Trim()~\\
+\cellcolor{green} & 1 & \verb~139~ & & \verb~          $valueToSet = $variableValue~\\
+\cellcolor{green} & 1 & \verb~140~ & & \verb~          $color = "Green"~\\
+\cellcolor{green} & 1 & \verb~141~ & & \verb~          $actionText = "Setting"~\\
+\cellcolor{gray} &  & \verb~142~ & & \verb~        }~\\
+\cellcolor{gray} &  & \verb~143~ & & \verb~        else {~\\
+\cellcolor{green} & 1 & \verb~144~ & & \verb~          $valueToSet = $null~\\
+\cellcolor{green} & 1 & \verb~145~ & & \verb~          $color = "Red"~\\
+\cellcolor{green} & 1 & \verb~146~ & & \verb~          $actionText = "Unsetting"~\\
+\cellcolor{gray} &  & \verb~147~ & & \verb~        }~\\
+\cellcolor{green} & 1 & \verb~148~ & & \verb~        [System.Environment]::SetEnvironmentVariable($variableName, $valueToSet)~\\
+\cellcolor{gray} &  & \verb~149~ & & \verb~~\\
+\cellcolor{green} & 1 & \verb~150~ & & \verb~        $fileUrl = "vscode://file/${EnvFile}:$lineNumber"~\\
+\cellcolor{gray} &  & \verb~151~ & & \verb~        # Add the environment variable action to the output with color and hyperlink~\\
+\cellcolor{green} & 1 & \verb~152~ & & \verb~        $hyperlinkStart = "$script:e]8;;$fileUrl$script:e\"~\\
+\cellcolor{green} & 1 & \verb~153~ & & \verb~        $hyperlinkEnd = "$script:e]8;;$script:e\"~\\
+\cellcolor{green} & 1 & \verb~154~ & & \verb~        $variableString = "$hyperlinkStart$variableName$hyperlinkEnd"~\\
+\cellcolor{gray} &  & \verb~155~ & & \verb~~\\
+\cellcolor{green} & 1 & \verb~156~ & & \verb~        Write-Host "$script:itemiser $actionText environment variable: " -NoNewline~\\
+\cellcolor{green} & 1 & \verb~157~ & & \verb~        Write-Host "$variableString" -ForegroundColor "$color"~\\
+\cellcolor{gray} &  & \verb~158~ & & \verb~      }~\\
+\cellcolor{gray} &  & \verb~159~ & & \verb~    }~\\
+\cellcolor{gray} &  & \verb~160~ & & \verb~  }~\\
+\cellcolor{gray} &  & \verb~161~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~162~ & & \verb~  # Return the output as a string~\\
+\cellcolor{green} & 1 & \verb~163~ & & \verb~  return $output~\\
+\cellcolor{gray} &  & \verb~164~ & & \verb~}~\\
+\cellcolor{gray} &  & \verb~165~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~166~ & & \verb~function Format-EnvFiles {~\\
+\cellcolor{gray} &  & \verb~167~ & & \verb~  param (~\\
+\cellcolor{gray} &  & \verb~168~ & & \verb~    [array]$EnvFiles,~\\
+\cellcolor{gray} &  & \verb~169~ & & \verb~    [string]$BasePath,~\\
+\cellcolor{gray} &  & \verb~170~ & & \verb~    [string]$Action, # "Load" or "Unload"~\\
+\cellcolor{gray} &  & \verb~171~ & & \verb~    [string]$Message, # Message to display (e.g., "added" or "removed")~\\
+\cellcolor{gray} &  & \verb~172~ & & \verb~    [string]$ForegroundColor # Color for the action message~\\
+\cellcolor{gray} &  & \verb~173~ & & \verb~  )~\\
+\cellcolor{gray} &  & \verb~174~ & & \verb~~\\
+\cellcolor{green} & 1 & \verb~175~ & & \verb~  if ($EnvFiles) {~\\
+\cellcolor{gray} &  & \verb~176~ & & \verb~    # Initialize a string to store the full output~\\
+\cellcolor{green} & 1 & \verb~177~ & & \verb~    $listOutput = "The following .env files were ${Message}:`n"~\\
+\cellcolor{gray} &  & \verb~178~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~179~ & & \verb~    # Collect formatted paths~\\
+\cellcolor{green} & 1 & \verb~180~ & & \verb~    foreach ($envFile in $EnvFiles) {~\\
+\cellcolor{green} & 1 & \verb~181~ & & \verb~      $formattedPath = Format-EnvFilePath -Path $envFile -BasePath $BasePath~\\
+\cellcolor{green} & 1 & \verb~182~ & & \verb~      $listOutput += "$script:itemiser $formattedPath`n"~\\
+\cellcolor{gray} &  & \verb~183~ & & \verb~    }~\\
+\cellcolor{gray} &  & \verb~184~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~185~ & & \verb~    # Display the full output at once with colors~\\
+\cellcolor{green} & 1 & \verb~186~ & & \verb~    Write-Host $listOutput -ForegroundColor DarkGray~\\
+\cellcolor{gray} &  & \verb~187~ & & \verb~~\\
+\cellcolor{green} & 1 & \verb~188~ & & \verb~    foreach ($envFile in $EnvFiles) {~\\
+\cellcolor{green} & 1 & \verb~189~ & & \verb~      Format-EnvFile -EnvFile $envFile -BasePath $BasePath -Action $Action -ForegroundColor $ForegroundColor~\\
+\cellcolor{gray} &  & \verb~190~ & & \verb~    }~\\
+\cellcolor{gray} &  & \verb~191~ & & \verb~  }~\\
+\cellcolor{gray} &  & \verb~192~ & & \verb~}~\\
+\cellcolor{gray} &  & \verb~193~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~194~ & & \verb~function Import-DotEnv {~\\
+\cellcolor{gray} &  & \verb~195~ & & \verb~  param (~\\
+\cellcolor{gray} &  & \verb~196~ & & \verb~    [string]$Path = "."~\\
+\cellcolor{gray} &  & \verb~197~ & & \verb~  )~\\
+\cellcolor{gray} &  & \verb~198~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~199~ & & \verb~  # Resolve the full path of the directory~\\
+\cellcolor{gray} &  & \verb~200~ & & \verb~  try {~\\
+\cellcolor{green} & 1 & \verb~201~ & & \verb~    $resolvedPath = Resolve-Path -Path $Path -ErrorAction Stop~\\
+\cellcolor{gray} &  & \verb~202~ & & \verb~  }~\\
+\cellcolor{gray} &  & \verb~203~ & & \verb~  catch {~\\
+\cellcolor{red} & 0 & \verb~204~ & & \verb~    $resolvedPath = (Get-Location).Path~\\
+\cellcolor{gray} &  & \verb~205~ & & \verb~  }~\\
+\cellcolor{gray} &  & \verb~206~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~207~ & & \verb~  # Get the current list of .env files~\\
+\cellcolor{green} & 1 & \verb~208~ & & \verb~  $currentEnvFiles = Get-EnvFilesUpstream -Directory $resolvedPath~\\
+\cellcolor{gray} &  & \verb~209~ & & \verb~~\\
+\cellcolor{green} & 1 & \verb~210~ & & \verb~  $previousEnvFilesSet = [System.Collections.Generic.HashSet[string]]::new()~\\
+\cellcolor{green} & 1 & \verb~211~ & & \verb~  foreach ($file in $script:previousEnvFiles) {~\\
+\cellcolor{green} & 1 & \verb~212~ & & \verb~    [void]$previousEnvFilesSet.Add($file)~\\
+\cellcolor{gray} &  & \verb~213~ & & \verb~  }~\\
+\cellcolor{gray} &  & \verb~214~ & & \verb~~\\
+\cellcolor{green} & 1 & \verb~215~ & & \verb~  $currentEnvFilesSet = [System.Collections.Generic.HashSet[string]]::new()~\\
+\cellcolor{green} & 1 & \verb~216~ & & \verb~  foreach ($file in $currentEnvFiles) {~\\
+\cellcolor{green} & 1 & \verb~217~ & & \verb~    [void]$currentEnvFilesSet.Add($file)~\\
+\cellcolor{gray} &  & \verb~218~ & & \verb~  }~\\
+\cellcolor{gray} &  & \verb~219~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~220~ & & \verb~  # Compare with the previous list to detect removed .env files~\\
+\cellcolor{green} & 1 & \verb~221~ & & \verb~  $removedEnvFiles = $script:previousEnvFiles | Where-Object { -not $currentEnvFilesSet.Contains($_) }~\\
+\cellcolor{gray} &  & \verb~222~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~223~ & & \verb~  # Compare with the previous list to detect added .env files~\\
+\cellcolor{green} & 1 & \verb~224~ & & \verb~  $addedEnvFiles = $currentEnvFiles | Where-Object { -not $previousEnvFilesSet.Contains($_) }~\\
+\cellcolor{gray} &  & \verb~225~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~226~ & & \verb~  # Process removed .env files (relative to current path)~\\
+\cellcolor{green} & 1 & \verb~227~ & & \verb~  Format-EnvFiles -EnvFiles $removedEnvFiles -BasePath $resolvedPath -Action "Unload" -Message "removed" -ForegroundColo~\\
+\cellcolor{gray} &  & \verb~228~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~229~ & & \verb~  # Process added .env files (relative to previous path)~\\
+\cellcolor{green} & 1 & \verb~230~ & & \verb~  Format-EnvFiles -EnvFiles $addedEnvFiles -BasePath $script:previousWorkingDirectory -Action "Load" -Message "added" -F~\\
+\cellcolor{gray} &  & \verb~231~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~232~ & & \verb~  # Update the previous list with the current list~\\
+\cellcolor{green} & 1 & \verb~233~ & & \verb~  $script:previousEnvFiles = $currentEnvFiles~\\
+\cellcolor{gray} &  & \verb~234~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~235~ & & \verb~  # Update the previous working directory~\\
+\cellcolor{green} & 1 & \verb~236~ & & \verb~  $script:previousWorkingDirectory = $resolvedPath~\\
+\cellcolor{gray} &  & \verb~237~ & & \verb~}~\\
+\cellcolor{gray} &  & \verb~238~ & & \verb~~\\
+\cellcolor{gray} &  & \verb~239~ & & \verb~function Set-Location {~\\
+\cellcolor{gray} &  & \verb~240~ & & \verb~  param (~\\
+\cellcolor{gray} &  & \verb~241~ & & \verb~    [string]$Path~\\
+\cellcolor{gray} &  & \verb~242~ & & \verb~  )~\\
+\cellcolor{gray} &  & \verb~243~ & & \verb~~\\
+\cellcolor{green} & 1 & \verb~244~ & & \verb~  Microsoft.PowerShell.Management\Set-Location $Path~\\
+\cellcolor{green} & 1 & \verb~245~ & & \verb~  Import-DotEnv~\\
+\cellcolor{gray} &  & \verb~246~ & & \verb~}~\\
+\cellcolor{gray} &  & \verb~247~ & & \verb~~\\
+\cellcolor{green} & 1 & \verb~248~ & & \verb~Export-ModuleMember -Function Get-EnvFilesUpstream, Import-DotEnv, Set-Location~\\
+\end{longtable}
+\end{document}
