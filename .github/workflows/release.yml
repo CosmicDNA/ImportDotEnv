@@ -26,14 +26,6 @@ jobs:
       - name: Publish and Save Module
         run: |
           pwsh -Command "`$apiKey = `$env:PSGALLERY_API_KEY; Publish-Module -Path . -NuGetApiKey `$apiKey"
-          New-Item -ItemType Directory -Path .\output
-          Save-Module -Name ImportDotEnv -Path .\output
-
-      - name: Determine Package Filename
-        id: pkgname
-        run: |
-          $pkg = Get-ChildItem -Path .\output\*.nupkg | Select-Object -First 1
-          echo "PKG_NAME=$($pkg.Name)" >> $GITHUB_ENV
 
       - name: Create GitHub Release
         uses: actions/create-release@v1
@@ -44,14 +36,6 @@ jobs:
           release_name: Release ${{ github.ref }}
           body: "Check out the latest features and fixes! Coverage: ${{ env.COVERAGE }}%"
           draft: true
-
-      - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./output/${{ env.PKG_NAME }}
-          asset_name: ${{ env.PKG_NAME }}
-          asset_content_type: application/zip
 
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v2
