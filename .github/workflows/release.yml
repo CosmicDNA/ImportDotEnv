@@ -26,6 +26,7 @@ jobs:
       - name: Publish and Save Module
         run: |
           pwsh -Command "`$apiKey = `$env:PSGALLERY_API_KEY; Publish-Module -Path . -NuGetApiKey `$apiKey"
+          New-Item -ItemType Directory -Path .\output
           Save-Module -Name ImportDotEnv -Path .\output
 
       - name: Determine Package Filename
