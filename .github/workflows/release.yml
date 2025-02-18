@@ -19,7 +19,7 @@ jobs:
       - name: Run Pester tests
         run: |
           # Run Pester tests with coverage
-          $COVERAGE = & .\scripts\RunTests.ps1 -EnableCoverage -GenerateReport
+          $COVERAGE = & .\scripts\RunTests.ps1 -EnableCoverage
           # Update env var with the coverage information
           echo "COVERAGE=$COVERAGE" >> $GITHUB_ENV
 
@@ -49,20 +49,6 @@ jobs:
           asset_path: ./output/${{ env.PKG_NAME }}
           asset_name: ${{ env.PKG_NAME }}
           asset_content_type: application/zip
-
-      - name: Setup .NET 9
-        uses: actions/setup-dotnet@v2
-        with:
-          dotnet-version: '9.0.x'
-
-      - name: Install ReportGenerator
-        run: |
-          $userTempFolder = [System.IO.Path]::GetTempPath()
-          $guid = [guid]::NewGuid()
-          $userTempDir="$userTempFolder$guid"
-          certutil.exe -urlcache -split -f "https://github.com/danielpalme/ReportGenerator/releases/download/v5.4.4/ReportGenerator_5.4.4.zip" "${userTempDir}RG.zip"
-          Expand-Archive "${userTempDir}RG.zip" -DestinationPath "${userTempDir}reportgenerator"
-          Copy-Item -Path "${userTempDir}reportgenerator\net9.0" -Destination reportgenerator -Recurse
 
       - name: Generate code coverage report
         run: |
