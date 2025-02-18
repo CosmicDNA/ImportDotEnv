@@ -195,6 +195,7 @@ This project is licensed under the MIT License. See the LICENSE file for details
 # Links
 - GitHub Repository: https://github.com/CosmicDNA/ImportDotEnv
 - PowerShell Gallery: https://www.powershellgallery.com/packages/ImportDotEnv
+- Code Coverage: https://cosmicdna.github.io/ImportDotEnv
 
 # Author
 - Cosmic DNA
