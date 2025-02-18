@@ -21,4 +21,6 @@ jobs:
         run: Install-Module -Name Pester -Force -SkipPublisherCheck -Scope CurrentUser
 
       - name: Run Pester tests
-        run: powershell -ExecutionPolicy Bypass -Command ".\scripts\RunTests.ps1"
+        run: |
+          # Run Pester tests without coverage nor coverage report generation
+          .\scripts\RunTests.ps1

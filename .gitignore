@@ -1,1 +1,4 @@
 .env
+coverage.xml
+reports/
+reportgenerator/

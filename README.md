@@ -1,5 +1,6 @@
 # ImportDotEnv
 
+![CI/CD](https://github.com/CosmicDNA/ImportDotEnv/actions/workflows/pester.yml/badge.svg)
 [![PowerShell Gallery](https://img.shields.io/powershellgallery/v/ImportDotEnv?label=PowerShell%20Gallery)](https://www.powershellgallery.com/packages/ImportDotEnv)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 

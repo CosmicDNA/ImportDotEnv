@@ -1,23 +1,47 @@
 # Run Pester tests and capture the results
-$parentPath = Split-Path "$PSScriptRoot" -Parent
-$testsPath = Join-Path $parentPath "Tests"
+param (
+    [switch]$EnableCoverage = $false,
+    [switch]$GenerateReport = $false
+)
 
-$results = Invoke-Pester -Path "$testsPath" -Output Detailed -PassThru
+$coverage = $EnableCoverage.IsPresent
+$generateReport = $GenerateReport.IsPresent
+
+$config = New-PesterConfiguration
+$config.Run.PassThru = $true
+$config.Output.Verbosity = "Detailed"
+
+if ($coverage){
+  $coverageReportPath = "coverage.xml"
+  $callingDirectory = Get-Location
+  $config.CodeCoverage.Enabled = $true
+  $config.CodeCoverage.Path = "*.psm1"
+  $config.CodeCoverage.OutputPath = Join-Path $callingDirectory $coverageReportPath
+  $config.CodeCoverage.OutputFormat = 'JaCoCo'
+}
+
+$results = Invoke-Pester -Configuration $config
 
 # Check if any tests failed
 if ($results.FailedCount -gt 0) {
     Write-Error "Pester tests failed. See the output for details."
-    # You can optionally throw an error to stop the script
+    # Throw an error to stop the script
     throw "Pester tests failed."
 } else {
     Write-Host "All Pester tests passed successfully."
 }
 
-# You can also use a more detailed message
-$results | ForEach-Object {
-    if ($_.FailedCount -gt 0) {
-        $_.TestResult.Failed | ForEach-Object {
-            Write-Error "Test '$($_.Name)' failed in script '$($_.ScriptPath)' with message: $($_.FailureMessage)"
-        }
-    }
+if ($coverage){
+  # Access code coverage information
+  $coverage = $results.CodeCoverage
+  $coveragePercentage = [math]::Round($coverage.CoveragePercent, 2)
+  Write-Host "Coverage Percentage: " -NoNewline
+  Write-Host "$coveragePercentage %`n" -ForegroundColor Green
+
+  if ($generateReport){
+    Write-Host Generating coverage report... -ForegroundColor Magenta
+    ./reportgenerator/ReportGenerator.exe -reports:$coverageReportPath -targetdir:reports -reporttypes:'Latex;Html' -sourcedirs:.\ | Out-Null
+  }
+  # Return the rounded coverage percentage
+  return $coveragePercentage
 }
