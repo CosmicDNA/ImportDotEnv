@@ -66,7 +66,7 @@ jobs:
 
       - name: Save coverage to JSON file
         run: |
-          $json = @{"schemaVersion"=1; "label"="coverage"; "message"="$COVERAGE%"; "color"="green"} | ConvertTo-Json
+          $json = @{"schemaVersion"=1; "label"="coverage"; "message"="$env:COVERAGE%"; "color"="green"} | ConvertTo-Json
           $json | Out-File -FilePath reports/coverage.json -Encoding utf8
 
       - name: Setup Pages
