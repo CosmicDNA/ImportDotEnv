@@ -68,11 +68,10 @@ jobs:
           }
           $moduleManifest.ModuleVersion = $newVersion
           $moduleManifest | Export-CliXml -Path $moduleManifestPath
-          Write-Host "Updated module version to $newVersion"
 
       - name: Publish and Save Module
         run: |
-          pwsh -Command "`$apiKey = `"${{ env.BUILD_NUMBER }}"; Publish-Module -Path . -NuGetApiKey `$apiKey"
+          pwsh -Command "`$apiKey = `"${{ env.PSGALLERY_API_KEY }}"; Publish-Module -Path . -NuGetApiKey `$apiKey"
 
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v2
