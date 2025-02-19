@@ -51,11 +51,15 @@ jobs:
         id: tag_type
         run: |
           if ($str -match 'v(\d+\.\d+\.\d+)(-(beta|alpha|rc)(\.\d+)?)?') {
-            Write-Output "BUILD=$($matches[1])" >> $env:GITHUB_ENV
+            $BUILD = $matches[1]
+            Write-Output "BUILD: $BUILD"
+            Write-Output "BUILD=$BUILD" >> $env:GITHUB_ENV
             if ($matches[3]) {
-              Write-Output "TAG_TYPE=$($matches[3])" >> $env:GITHUB_ENV
+              $TAG_TYPE = $matches[3]
+              Write-Output "TAG_TYPE=$TAG_TYPE" >> $env:GITHUB_ENV
               if ($matches[4]) {
-                Write-Output "BUILD_NUMBER=$($matches[4])" >> $env:GITHUB_ENV
+                $BUILD_NUMBER = $matches[4]
+                Write-Output "BUILD_NUMBER=$BUILD_NUMBER" >> $env:GITHUB_ENV
               }
             }
           }
@@ -106,7 +110,7 @@ jobs:
           $url = "https://www.powershellgallery.com/api/v2/package/$moduleName/$latestVersion"
 
           # Define the output path
-          $outputPath = "$env:TEMP\$moduleName.$latestVersion.nupkg"
+          $outputPath = "${{ runner.temp }}/$moduleName.$latestVersion.nupkg"
 
           # Download the .nupkg file using certutil.exe
           certutil.exe -urlcache -split -f $url $outputPath
