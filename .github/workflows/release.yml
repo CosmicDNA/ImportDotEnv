@@ -2,6 +2,7 @@ name: Release
 env:
   PSGALLERY_API_KEY: ${{ secrets.POWER_SHELL_GALLERY_API_KEY }}
   TAG_TYPE: 'stable'
+  BUILD: '0.0.0'
   BUILD_NUMBER: 0
   COVERAGE: 0
 on:
@@ -50,6 +51,7 @@ jobs:
         id: tag_type
         run: |
           if ("${{ github.ref_name }}" -match 'v(\d+\.\d+\.\d+)-(beta|alpha|rc)\.(\d+)') {
+            echo "BUILD=$($matches[1])" >> $env:GITHUB_ENV
             echo "TAG_TYPE=$($matches[2])" >> $env:GITHUB_ENV
             echo "BUILD_NUMBER=$($matches[3])" >> $env:GITHUB_ENV
           }
@@ -86,6 +88,38 @@ jobs:
           body: "Check out the latest features and fixes! Coverage: ${{ env.COVERAGE }}%"
           draft: true
 
+      - name: Download Nupkg
+        if: env.TAG_TYPE == 'stable'
+        run: |
+          # Define the module name
+          $moduleName = "ImportDotEnv"
+
+          # Find the latest version
+          $latestVersion = "${{ env.BUILD }}"
+
+          # Define the URL for the .nupkg file
+          $url = "https://www.powershellgallery.com/api/v2/package/$moduleName/$latestVersion"
+
+          # Define the output path
+          $outputPath = "$env:TEMP\$moduleName.$latestVersion.nupkg"
+
+          # Download the .nupkg file using certutil.exe
+          certutil.exe -urlcache -split -f $url $outputPath
+
+          Write-Output "Downloaded $moduleName version $latestVersion to $outputPath"
+
+      - name: Upload Release Asset
+        id: upload-release-asset
+        if: env.TAG_TYPE == 'stable'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ runner.temp }}/ImportDotEnv.${{ env.BUILD }}.nupkg
+          asset_name: ImportDotEnv.${{ env.BUILD }}.nupkg
+          asset_content_type: application/zip
+
       - name: Setup .NET 9
         if: env.TAG_TYPE == 'stable'
         uses: actions/setup-dotnet@v2
@@ -103,10 +137,12 @@ jobs:
           Copy-Item -Path "${userTempDir}reportgenerator\net9.0" -Destination reportgenerator -Recurse
 
       - name: Generate code coverage report
+        if: env.TAG_TYPE == 'stable'
         run: |
           ./reportgenerator/ReportGenerator.exe -reports:coverage.xml -targetdir:reports -reporttypes:'Latex;Html' -sourcedirs:.
 
       - name: Save coverage to JSON file
+        if: env.TAG_TYPE == 'stable'
         run: |
           $json = @{"schemaVersion"=1; "label"="coverage"; "message"="${{ env.COVERAGE }}%"; "color"="green"} | ConvertTo-Json
           $json | Out-File -FilePath reports/coverage.json -Encoding utf8
