@@ -40,6 +40,7 @@ jobs:
           # Run Pester tests with coverage
           $COVERAGE = & .\scripts\RunTests.ps1 -EnableCoverage
           # Update env var with the coverage information
+          Write-Host "Coverage: $COVERAGE"
           echo "COVERAGE=$COVERAGE" >> $GITHUB_ENV
 
       - name: Publish and Save Module
