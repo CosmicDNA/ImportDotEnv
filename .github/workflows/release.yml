@@ -1,6 +1,7 @@
 name: Release
 env:
   PSGALLERY_API_KEY: ${{ secrets.POWER_SHELL_GALLERY_API_KEY }}
+  TAG_TYPE: ${{ 'stable' }}
 on:
   push:
     tags:
@@ -43,19 +44,28 @@ jobs:
           Write-Host "Coverage: $COVERAGE"
           echo "COVERAGE=$COVERAGE" >> $GITHUB_ENV
 
-      - name: Increment Version (Beta, Alpha, RC)
-        if: contains(github.ref, '-beta') || contains(github.ref, '-alpha') || contains(github.ref, '-rc')
+      - name: Determine Tag Type and update TAG_TYPE
+        id: tag_type
         run: |
-          $moduleManifestPath = ".\ImportDotEnv.psd1"
+          if [[ "${{ github.ref_name }}" == *"-beta"* ]]; then
+            echo "TAG_TYPE=beta" >> $GITHUB_ENV
+          elif [[ "${{ github.ref_name }}" == *"-alpha"* ]]; then
+            echo "TAG_TYPE=alpha" >> $GITHUB_ENV
+          elif [[ "${{ github.ref_name }}" == *"-rc"* ]]; then
+            echo "TAG_TYPE=rc" >> $GITHUB_ENV
+          fi
+
+      - name: Increment Version (Beta, Alpha, RC)
+        if: env.TAG_TYPE != 'stable'
+        run: |
+          $moduleManifestPath = ".\path\to\your\module\YourModuleName.psd1"
           $moduleManifest = Import-PowerShellDataFile -Path $moduleManifestPath
           $currentVersion = [version]$moduleManifest.ModuleVersion
           $buildNumber = if ($currentVersion.Build -ne -1) { $currentVersion.Build + 1 } else { 1 }
-          if (contains(github.ref, '-beta')) {
-              $newVersion = "{0}.{1}.{2}-beta.{3}" -f $currentVersion.Major, $currentVersion.Minor, $currentVersion.Build, $buildNumber
-          } elseif (contains(github.ref, '-alpha')) {
-              $newVersion = "{0}.{1}.{2}-alpha.{3}" -f $currentVersion.Major, $currentVersion.Minor, $currentVersion.Build, $buildNumber
-          } elseif (contains(github.ref, '-rc')) {
-              $newVersion = "{0}.{1}.{2}-rc.{3}" -f $currentVersion.Major, $currentVersion.Minor, $currentVersion.Build, $buildNumber
+          switch ("$env:TAG_TYPE") {
+            'beta' { $newVersion = "{0}.{1}.{2}-beta.{3}" -f $currentVersion.Major, $currentVersion.Minor, $currentVersion.Build, $buildNumber }
+            'alpha' { $newVersion = "{0}.{1}.{2}-alpha.{3}" -f $currentVersion.Major, $currentVersion.Minor, $currentVersion.Build, $buildNumber }
+            'rc' { $newVersion = "{0}.{1}.{2}-rc.{3}" -f $currentVersion.Major, $currentVersion.Minor, $currentVersion.Build, $buildNumber }
           }
           $moduleManifest.ModuleVersion = $newVersion
           $moduleManifest | Export-CliXml -Path $moduleManifestPath
