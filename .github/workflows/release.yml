@@ -1,7 +1,9 @@
 name: Release
 env:
   PSGALLERY_API_KEY: ${{ secrets.POWER_SHELL_GALLERY_API_KEY }}
-  TAG_TYPE: ${{ 'stable' }}
+  TAG_TYPE: 'stable'
+  BUILD_NUMBER: 0
+  COVERAGE: 0
 on:
   push:
     tags:
@@ -42,19 +44,14 @@ jobs:
           $COVERAGE = & .\scripts\RunTests.ps1 -EnableCoverage
           # Update env var with the coverage information
           Write-Host "Coverage: $COVERAGE"
-          echo "COVERAGE=$COVERAGE" >> $GITHUB_ENV
+          echo "COVERAGE=$COVERAGE" >> $env:GITHUB_ENV
 
       - name: Determine Tag Type and update TAG_TYPE
         id: tag_type
         run: |
-          if ("${{ github.ref_name }}" -like '*-beta*') {
-            echo "TAG_TYPE=beta" >> $env:GITHUB_ENV
-          } elseif ("${{ github.ref_name }}" -like '*-alpha*') {
-            echo "TAG_TYPE=alpha" >> $env:GITHUB_ENV
-          } elseif ("${{ github.ref_name }}" -like '*-rc*') {
-            echo "TAG_TYPE=rc" >> $env:GITHUB_ENV
-          } else {
-            echo "TAG_TYPE=stable" >> $env:GITHUB_ENV
+          if ("${{ github.ref_name }}" -match 'v(\d+\.\d+\.\d+)-(beta|alpha|rc)\.(\d+)') {
+            echo "TAG_TYPE=$($matches[2])" >> $env:GITHUB_ENV
+            echo "BUILD_NUMBER=$($matches[3])" >> $env:GITHUB_ENV
           }
 
       - name: Increment Version (Beta, Alpha, RC)
@@ -63,8 +60,8 @@ jobs:
           $moduleManifestPath = ".\ImportDotEnv.psd1"
           $moduleManifest = Import-PowerShellDataFile -Path $moduleManifestPath
           $currentVersion = [version]$moduleManifest.ModuleVersion
-          $buildNumber = if ($currentVersion.Build -ne -1) { $currentVersion.Build + 1 } else { 1 }
-          switch ("$env:TAG_TYPE") {
+          $buildNumber = ${{ env.BUILD_NUMBER }}"
+          switch ("${{ env.TAG_TYPE }}") {
             'beta' { $newVersion = "{0}.{1}.{2}-beta.{3}" -f $currentVersion.Major, $currentVersion.Minor, $currentVersion.Build, $buildNumber }
             'alpha' { $newVersion = "{0}.{1}.{2}-alpha.{3}" -f $currentVersion.Major, $currentVersion.Minor, $currentVersion.Build, $buildNumber }
             'rc' { $newVersion = "{0}.{1}.{2}-rc.{3}" -f $currentVersion.Major, $currentVersion.Minor, $currentVersion.Build, $buildNumber }
@@ -75,7 +72,7 @@ jobs:
 
       - name: Publish and Save Module
         run: |
-          pwsh -Command "`$apiKey = `$env:PSGALLERY_API_KEY; Publish-Module -Path . -NuGetApiKey `$apiKey"
+          pwsh -Command "`$apiKey = `"${{ env.BUILD_NUMBER }}"; Publish-Module -Path . -NuGetApiKey `$apiKey"
 
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v2
@@ -97,7 +94,7 @@ jobs:
 
       - name: Save coverage to JSON file
         run: |
-          $json = @{"schemaVersion"=1; "label"="coverage"; "message"="$env:COVERAGE%"; "color"="green"} | ConvertTo-Json
+          $json = @{"schemaVersion"=1; "label"="coverage"; "message"="${{ env.COVERAGE }}%"; "color"="green"} | ConvertTo-Json
           $json | Out-File -FilePath reports/coverage.json -Encoding utf8
 
       - name: Setup Pages
