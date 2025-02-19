@@ -51,7 +51,6 @@ jobs:
         run: |
           if ("${{ github.ref_name }}" -match 'v(\d+\.\d+\.\d+)(-(beta|alpha|rc)(\.(\d+))?)?') {
             $BUILD_VERSION = $matches[1]
-            Write-Output "BUILD_VERSION: $BUILD_VERSION"
             Write-Output "BUILD_VERSION=$BUILD_VERSION" >> $env:GITHUB_ENV
             if ($matches[3]) {
               $TAG_TYPE = $matches[3]
@@ -80,13 +79,13 @@ jobs:
           Write-Host "Updated module version to $newVersion"
 
       - name: Publish and Save Module
-        # if: env.TAG_TYPE == 'stable'
+        if: env.TAG_TYPE == 'stable'
         run: |
           pwsh -Command "`$apiKey = `$env:PSGALLERY_API_KEY; Publish-Module -Path . -NuGetApiKey `$apiKey"
 
       - name: Create GitHub Release
         id: create_release
-        # if: env.TAG_TYPE == 'stable'
+        if: env.TAG_TYPE == 'stable'
         uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -97,7 +96,7 @@ jobs:
           draft: true
 
       - name: Download Nupkg
-        # if: env.TAG_TYPE == 'stable'
+        if: env.TAG_TYPE == 'stable'
         run: |
           # Define the module name
           $moduleName = "ImportDotEnv"
@@ -118,7 +117,7 @@ jobs:
 
       - name: Upload Release Asset
         id: upload-release-asset
-        # if: env.TAG_TYPE == 'stable'
+        if: env.TAG_TYPE == 'stable'
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
