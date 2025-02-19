@@ -47,13 +47,15 @@ jobs:
       - name: Determine Tag Type and update TAG_TYPE
         id: tag_type
         run: |
-          if [[ "${{ github.ref_name }}" == *"-beta"* ]]; then
-            echo "TAG_TYPE=beta" >> $GITHUB_ENV
-          elif [[ "${{ github.ref_name }}" == *"-alpha"* ]]; then
-            echo "TAG_TYPE=alpha" >> $GITHUB_ENV
-          elif [[ "${{ github.ref_name }}" == *"-rc"* ]]; then
-            echo "TAG_TYPE=rc" >> $GITHUB_ENV
-          fi
+          if ("${{ github.ref_name }}" -like '*-beta*') {
+            echo "TAG_TYPE=beta" >> $env:GITHUB_ENV
+          } elseif ("${{ github.ref_name }}" -like '*-alpha*') {
+            echo "TAG_TYPE=alpha" >> $env:GITHUB_ENV
+          } elseif ("${{ github.ref_name }}" -like '*-rc*') {
+            echo "TAG_TYPE=rc" >> $env:GITHUB_ENV
+          } else {
+            echo "TAG_TYPE=stable" >> $env:GITHUB_ENV
+          }
 
       - name: Increment Version (Beta, Alpha, RC)
         if: env.TAG_TYPE != 'stable'
