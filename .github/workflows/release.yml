@@ -43,6 +43,24 @@ jobs:
           Write-Host "Coverage: $COVERAGE"
           echo "COVERAGE=$COVERAGE" >> $GITHUB_ENV
 
+      - name: Increment Version (Beta, Alpha, RC)
+        if: contains(github.ref, '-beta') || contains(github.ref, '-alpha') || contains(github.ref, '-rc')
+        run: |
+          $moduleManifestPath = ".\ImportDotEnv.psd1"
+          $moduleManifest = Import-PowerShellDataFile -Path $moduleManifestPath
+          $currentVersion = [version]$moduleManifest.ModuleVersion
+          $buildNumber = if ($currentVersion.Build -ne -1) { $currentVersion.Build + 1 } else { 1 }
+          if (contains(github.ref, '-beta')) {
+              $newVersion = "{0}.{1}.{2}-beta.{3}" -f $currentVersion.Major, $currentVersion.Minor, $currentVersion.Build, $buildNumber
+          } elseif (contains(github.ref, '-alpha')) {
+              $newVersion = "{0}.{1}.{2}-alpha.{3}" -f $currentVersion.Major, $currentVersion.Minor, $currentVersion.Build, $buildNumber
+          } elseif (contains(github.ref, '-rc')) {
+              $newVersion = "{0}.{1}.{2}-rc.{3}" -f $currentVersion.Major, $currentVersion.Minor, $currentVersion.Build, $buildNumber
+          }
+          $moduleManifest.ModuleVersion = $newVersion
+          $moduleManifest | Export-CliXml -Path $moduleManifestPath
+          Write-Host "Updated module version to $newVersion"
+
       - name: Publish and Save Module
         run: |
           pwsh -Command "`$apiKey = `$env:PSGALLERY_API_KEY; Publish-Module -Path . -NuGetApiKey `$apiKey"
