@@ -73,7 +73,7 @@ jobs:
       - name: Publish and Save Module
         if: env.TAG_TYPE == 'stable'
         run: |
-          pwsh -Command "`$apiKey = `${{ env.PSGALLERY_API_KEY }}; Publish-Module -Path . -NuGetApiKey `$apiKey"
+          pwsh -Command "`$apiKey = `$env:PSGALLERY_API_KEY; Publish-Module -Path . -NuGetApiKey `$apiKey"
 
       - name: Create GitHub Release
         if: env.TAG_TYPE == 'stable'
