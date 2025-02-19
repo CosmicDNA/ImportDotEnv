@@ -60,7 +60,7 @@ jobs:
           $moduleManifestPath = ".\ImportDotEnv.psd1"
           $moduleManifest = Import-PowerShellDataFile -Path $moduleManifestPath
           $currentVersion = [version]$moduleManifest.ModuleVersion
-          $buildNumber = ${{ env.BUILD_NUMBER }}"
+          $buildNumber = "${{ env.BUILD_NUMBER }}"
           switch ("${{ env.TAG_TYPE }}") {
             'beta' { $newVersion = "{0}.{1}.{2}-beta.{3}" -f $currentVersion.Major, $currentVersion.Minor, $currentVersion.Build, $buildNumber }
             'alpha' { $newVersion = "{0}.{1}.{2}-alpha.{3}" -f $currentVersion.Major, $currentVersion.Minor, $currentVersion.Build, $buildNumber }
@@ -68,8 +68,10 @@ jobs:
           }
           $moduleManifest.ModuleVersion = $newVersion
           $moduleManifest | Export-CliXml -Path $moduleManifestPath
+          Write-Host "Updated module version to $newVersion"
 
       - name: Publish and Save Module
+        if: env.TAG_TYPE == 'stable'
         run: |
           pwsh -Command "`$apiKey = `"${{ env.PSGALLERY_API_KEY }}"; Publish-Module -Path . -NuGetApiKey `$apiKey"
 
