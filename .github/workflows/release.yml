@@ -49,7 +49,7 @@ jobs:
       - name: Determine Tag Type and update TAG_TYPE
         id: tag_type
         run: |
-          if ($str -match 'v(\d+\.\d+\.\d+)(-(beta|alpha|rc)(\.\d+)?)?') {
+          if ("${{ github.ref_name }}" -match 'v(\d+\.\d+\.\d+)(-(beta|alpha|rc)(\.\d+)?)?') {
             $BUILD_VERSION = $matches[1]
             Write-Output "BUILD_VERSION: $BUILD_VERSION"
             Write-Output "BUILD_VERSION=$BUILD_VERSION" >> $env:GITHUB_ENV
@@ -124,8 +124,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ${{ runner.temp }}/ImportDotEnv.${{ env.BUILD }}.nupkg
-          asset_name: ImportDotEnv.${{ env.BUILD }}.nupkg
+          asset_path: ${{ runner.temp }}/ImportDotEnv.${{ env.BUILD_VERSION }}.nupkg
+          asset_name: ImportDotEnv.${{ env.BUILD_VERSION }}.nupkg
           asset_content_type: application/zip
 
       - name: Setup .NET 9
