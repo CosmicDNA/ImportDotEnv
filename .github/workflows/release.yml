@@ -2,7 +2,7 @@ name: Release
 env:
   PSGALLERY_API_KEY: ${{ secrets.POWER_SHELL_GALLERY_API_KEY }}
   TAG_TYPE: 'stable'
-  BUILD: '0.0.0'
+  BUILD_VERSION: '0.0.0'
   BUILD_NUMBER: 0
   COVERAGE: 0
 on:
@@ -44,16 +44,15 @@ jobs:
           # Run Pester tests with coverage
           $COVERAGE = & .\scripts\RunTests.ps1 -EnableCoverage
           # Update env var with the coverage information
-          Write-Host "Coverage: $COVERAGE"
           echo "COVERAGE=$COVERAGE" >> $env:GITHUB_ENV
 
       - name: Determine Tag Type and update TAG_TYPE
         id: tag_type
         run: |
           if ($str -match 'v(\d+\.\d+\.\d+)(-(beta|alpha|rc)(\.\d+)?)?') {
-            $BUILD = $matches[1]
-            Write-Output "BUILD: $BUILD"
-            Write-Output "BUILD=$BUILD" >> $env:GITHUB_ENV
+            $BUILD_VERSION = $matches[1]
+            Write-Output "BUILD_VERSION: $BUILD_VERSION"
+            Write-Output "BUILD_VERSION=$BUILD_VERSION" >> $env:GITHUB_ENV
             if ($matches[3]) {
               $TAG_TYPE = $matches[3]
               Write-Output "TAG_TYPE=$TAG_TYPE" >> $env:GITHUB_ENV
@@ -81,13 +80,13 @@ jobs:
           Write-Host "Updated module version to $newVersion"
 
       - name: Publish and Save Module
-        if: env.TAG_TYPE == 'stable'
+        # if: env.TAG_TYPE == 'stable'
         run: |
           pwsh -Command "`$apiKey = `$env:PSGALLERY_API_KEY; Publish-Module -Path . -NuGetApiKey `$apiKey"
 
       - name: Create GitHub Release
         id: create_release
-        if: env.TAG_TYPE == 'stable'
+        # if: env.TAG_TYPE == 'stable'
         uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -98,13 +97,13 @@ jobs:
           draft: true
 
       - name: Download Nupkg
-        if: env.TAG_TYPE == 'stable'
+        # if: env.TAG_TYPE == 'stable'
         run: |
           # Define the module name
           $moduleName = "ImportDotEnv"
 
           # Find the latest version
-          $latestVersion = "${{ env.BUILD }}"
+          $latestVersion = "${{ env.BUILD_VERSION }}"
 
           # Define the URL for the .nupkg file
           $url = "https://www.powershellgallery.com/api/v2/package/$moduleName/$latestVersion"
@@ -119,7 +118,7 @@ jobs:
 
       - name: Upload Release Asset
         id: upload-release-asset
-        if: env.TAG_TYPE == 'stable'
+        # if: env.TAG_TYPE == 'stable'
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
