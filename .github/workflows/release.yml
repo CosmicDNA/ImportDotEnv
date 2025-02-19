@@ -58,7 +58,7 @@ jobs:
       - name: Increment Version (Beta, Alpha, RC)
         if: env.TAG_TYPE != 'stable'
         run: |
-          $moduleManifestPath = ".\path\to\your\module\YourModuleName.psd1"
+          $moduleManifestPath = ".\ImportDotEnv.psd1"
           $moduleManifest = Import-PowerShellDataFile -Path $moduleManifestPath
           $currentVersion = [version]$moduleManifest.ModuleVersion
           $buildNumber = if ($currentVersion.Build -ne -1) { $currentVersion.Build + 1 } else { 1 }
