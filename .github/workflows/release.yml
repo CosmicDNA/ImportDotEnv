@@ -75,6 +75,17 @@ jobs:
         run: |
           pwsh -Command "`$apiKey = `"${{ env.PSGALLERY_API_KEY }}"; Publish-Module -Path . -NuGetApiKey `$apiKey"
 
+      - name: Create GitHub Release
+        if: env.TAG_TYPE == 'stable'
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          body: "Check out the latest features and fixes! Coverage: ${{ env.COVERAGE }}%"
+          draft: true
+
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v2
         with:
