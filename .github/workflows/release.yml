@@ -73,7 +73,7 @@ jobs:
       - name: Publish and Save Module
         if: env.TAG_TYPE == 'stable'
         run: |
-          pwsh -Command "`$apiKey = `"${{ env.PSGALLERY_API_KEY }}"; Publish-Module -Path . -NuGetApiKey `$apiKey"
+          pwsh -Command "`$apiKey = `${{ env.PSGALLERY_API_KEY }}; Publish-Module -Path . -NuGetApiKey `$apiKey"
 
       - name: Create GitHub Release
         if: env.TAG_TYPE == 'stable'
@@ -87,11 +87,13 @@ jobs:
           draft: true
 
       - name: Setup .NET 9
+        if: env.TAG_TYPE == 'stable'
         uses: actions/setup-dotnet@v2
         with:
           dotnet-version: '9.0.x'
 
       - name: Install ReportGenerator
+        if: env.TAG_TYPE == 'stable'
         run: |
           $userTempFolder = [System.IO.Path]::GetTempPath()
           $guid = [guid]::NewGuid()
@@ -110,11 +112,14 @@ jobs:
           $json | Out-File -FilePath reports/coverage.json -Encoding utf8
 
       - name: Setup Pages
+        if: env.TAG_TYPE == 'stable'
         uses: actions/configure-pages@v5
       - name: Upload artifact
+        if: env.TAG_TYPE == 'stable'
         uses: actions/upload-pages-artifact@v3
         with:
           path: './reports'
       - name: Deploy to GitHub Pages
+        if: env.TAG_TYPE == 'stable'
         id: deployment
         uses: actions/deploy-pages@v4
