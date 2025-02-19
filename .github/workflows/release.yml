@@ -50,10 +50,14 @@ jobs:
       - name: Determine Tag Type and update TAG_TYPE
         id: tag_type
         run: |
-          if ("${{ github.ref_name }}" -match 'v(\d+\.\d+\.\d+)-(beta|alpha|rc)\.(\d+)') {
-            echo "BUILD=$($matches[1])" >> $env:GITHUB_ENV
-            echo "TAG_TYPE=$($matches[2])" >> $env:GITHUB_ENV
-            echo "BUILD_NUMBER=$($matches[3])" >> $env:GITHUB_ENV
+          if ($str -match 'v(\d+\.\d+\.\d+)(-(beta|alpha|rc)(\.\d+)?)?') {
+            Write-Output "BUILD=$($matches[1])" >> $env:GITHUB_ENV
+            if ($matches[3]) {
+              Write-Output "TAG_TYPE=$($matches[3])" >> $env:GITHUB_ENV
+              if ($matches[4]) {
+                Write-Output "BUILD_NUMBER=$($matches[4])" >> $env:GITHUB_ENV
+              }
+            }
           }
 
       - name: Increment Version (Beta, Alpha, RC)
