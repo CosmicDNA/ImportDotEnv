@@ -30,10 +30,10 @@ CompanyName = 'Cosmic DNA'
 Copyright = '(c) Cosmic DNA. All rights reserved.'
 
 # Description of the functionality provided by this module
-Description = 'A PowerShell module for managing .env files.'
+Description = 'Hierarchical .env file management for PowerShell with directory-aware loading/unloading'
 
 # Minimum version of the PowerShell engine required by this module
-# PowerShellVersion = ''
+PowerShellVersion = '4.0'
 
 # Name of the PowerShell host required by this module
 # PowerShellHostName = ''
@@ -76,13 +76,13 @@ FunctionsToExport = @(
 )
 
 # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.
-CmdletsToExport = '*'
+CmdletsToExport = @()
 
 # Variables to export from this module
-VariablesToExport = '*'
+VariablesToExport = @()
 
 # Aliases to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no aliases to export.
-AliasesToExport = '*'
+AliasesToExport = @()
 
 # DSC resources to export from this module
 # DscResourcesToExport = @()
@@ -99,7 +99,7 @@ PrivateData = @{
     PSData = @{
 
         # Tags applied to this module. These help with module discovery in online galleries.
-        Tags = 'env', 'dotenv', 'environment'
+        Tags = 'env', 'dotenv', 'environment', 'compatibility'
 
         # A URL to the license for this module.
         LicenseUri = 'https://opensource.org/licenses/MIT'
@@ -111,7 +111,13 @@ PrivateData = @{
         # IconUri = ''
 
         # ReleaseNotes of this module
-        # ReleaseNotes = ''
+        ReleaseNotes = @'
+- Added hierarchical .env file loading from root to current directory
+- Implemented proper environment variable precedence
+- Added VS Code hyperlink integration
+- Fixed path comparison issues on Windows
+- Improved change detection and reload logic
+'@
 
         # Prerelease string of this module
         # Prerelease = ''
