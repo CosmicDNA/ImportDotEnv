@@ -1,47 +1,81 @@
+# DotEnv.psm1
+
+# Requires -Version 5.1
+
 using namespace System.IO
-using namespace System
+using namespace System.Management.Automation
+
+$script:previousEnvFiles = @()
+$script:previousWorkingDirectory = $PWD.Path
+$script:e = [char]27
+$script:itemiser = [char]0x21B3
 
 function Get-RelativePath {
-  param (
+  [CmdletBinding()]
+  param(
+    [Parameter(Mandatory)]
     [string]$Path,
+
+    [Parameter(Mandatory)]
     [string]$BasePath
   )
 
+  try {
+    $absolutePath = [Path]::GetFullPath($Path)
+    $absoluteBasePath = [Path]::GetFullPath($BasePath)
+  }
+  catch {
+    return $Path
+  }
+
+  if ($absolutePath -eq $absoluteBasePath) {
+    return "."
+  }
+
   $separator = [Path]::DirectorySeparatorChar
+  $splitOptions = [StringSplitOptions]::RemoveEmptyEntries
 
-  $absolutePath = [Path]::GetFullPath($Path)
-  $absoluteBasePath = [Path]::GetFullPath($BasePath)
+  $pathSegments = $absolutePath.Split([Path]::DirectorySeparatorChar, $splitOptions)
+  $baseSegments = $absoluteBasePath.Split([Path]::DirectorySeparatorChar, $splitOptions)
 
-  $pathSegments = $absolutePath -split [regex]::Escape($separator)
-  $basePathSegments = $absoluteBasePath -split [regex]::Escape($separator)
+  $commonLength = 0
+  $minLength = [Math]::Min($pathSegments.Count, $baseSegments.Count)
 
-  $commonLength = (
-    0..([math]::Min($pathSegments.Length, $basePathSegments.Length) - 1)
-  ).Where({ $pathSegments[$_] -eq $basePathSegments[$_] }).Count
+  while ($commonLength -lt $minLength -and
+    $pathSegments[$commonLength] -eq $baseSegments[$commonLength]) {
+    $commonLength++
+  }
 
   if ($commonLength -eq 0) {
     return $absolutePath
   }
-  else {
-    $relativePath = @(".") + ($pathSegments[$commonLength..($pathSegments.Length - 1)])
+
+  $relativePath = New-Object System.Text.StringBuilder
+  for ($i = $commonLength; $i -lt $baseSegments.Count; $i++) {
+    [void]$relativePath.Append("..$separator")
   }
 
-  return $relativePath -join $separator
+  for ($i = $commonLength; $i -lt $pathSegments.Count; $i++) {
+    [void]$relativePath.Append($pathSegments[$i])
+    if ($i -lt $pathSegments.Count - 1) {
+      [void]$relativePath.Append($separator)
+    }
+  }
+
+  return $relativePath.ToString()
 }
 
-$script:previousEnvFiles = @()
-$script:previousWorkingDirectory = (Get-Location).Path
-
 function Get-EnvFilesUpstream {
-  param (
+  [CmdletBinding()]
+  param(
     [string]$Directory = "."
   )
 
   try {
-    $resolvedPath = Resolve-Path -Path $Directory -ErrorAction Stop
+    $resolvedPath = Convert-Path -Path $Directory -ErrorAction Stop
   }
   catch {
-    $resolvedPath = (Get-Location).Path
+    $resolvedPath = $PWD.Path
   }
 
   $envFiles = @()
@@ -49,151 +83,147 @@ function Get-EnvFilesUpstream {
 
   while ($currentDir) {
     $envPath = Join-Path $currentDir ".env"
-    if (Test-Path $envPath -PathType Leaf) {
+    if (Test-Path -LiteralPath $envPath -PathType Leaf) {
       $envFiles += $envPath
     }
 
-    $parentDir = Split-Path $currentDir -Parent
+    $parentDir = Split-Path -Path $currentDir -Parent
     if ($parentDir -eq $currentDir) { break }
     $currentDir = $parentDir
   }
 
-  # Fix 1: Reverse order to prioritize child -> parent -> root
-  [array]::Reverse($envFiles)
+  [Array]::Reverse($envFiles)
   return $envFiles
 }
 
-$script:e = [char]27
-$script:itemiser = [char]0x21B3
-
 function Format-EnvFilePath {
-  param (
+  [CmdletBinding()]
+  param(
+    [Parameter(Mandatory)]
     [string]$Path,
+
+    [Parameter(Mandatory)]
     [string]$BasePath
   )
 
   $relativePath = Get-RelativePath -Path $Path -BasePath $BasePath
-  $corePath = Split-Path $relativePath -Parent
-  $corePath = $corePath -replace '^\.\\', ''
-  return $relativePath -replace ([regex]::Escape($corePath), "$script:e[1m$corePath$script:e[22m")
+  $corePath = Split-Path -Path $relativePath -Parent
+
+  if (-not [string]::IsNullOrEmpty($corePath)) {
+    $boldCore = "${script:e}[1m${corePath}${script:e}[22m"
+    $relativePath = $relativePath.Replace($corePath, $boldCore)
+  }
+
+  return $relativePath
 }
 
 function Format-EnvFile {
-  param (
+  [CmdletBinding()]
+  param(
+    [Parameter(Mandatory)]
     [string]$EnvFile,
+
+    [Parameter(Mandatory)]
     [string]$BasePath,
-    [string]$Action,
-    [string]$ForegroundColor
+
+    [ValidateSet('Load', 'Unload')]
+    [string]$Action = 'Load',
+
+    [ConsoleColor]$ForegroundColor = 'Cyan'
   )
 
-  if (Test-Path $EnvFile -PathType Leaf) {
-    $formattedPath = Format-EnvFilePath -Path $EnvFile -BasePath $BasePath
-    Write-Host "$Action .env file ${formattedPath}:" -ForegroundColor $ForegroundColor
-
-    $content = Get-Content $EnvFile
-    $lineNumber = 0
-
-    foreach ($line in $content) {
-      $lineNumber++
-      $line = $line -replace '\s*#.*', ''
-      if ($line -match '^(.*)=(.*)$') {
-        $variableName = $matches[1].Trim()
-
-        if ($Action -eq "Load") {
-          $valueToSet = $matches[2].Trim()
-          $color = "Green"
-          $actionText = "Setting"
-        }
-        else {
-          $valueToSet = $null
-          $color = "Red"
-          $actionText = "Unsetting"
-        }
-
-        [Environment]::SetEnvironmentVariable($variableName, $valueToSet)
-        $fileUrl = "vscode://file/${EnvFile}:$lineNumber"
-        $hyperlink = "$script:e]8;;$fileUrl$script:e\$variableName$script:e]8;;$script:e\"
-
-        Write-Host "$script:itemiser $actionText environment variable: " -NoNewline
-        Write-Host $hyperlink -ForegroundColor $color
-      }
-    }
+  if (-not (Test-Path -LiteralPath $EnvFile -PathType Leaf)) {
+    return
   }
-}
 
-function Format-EnvFiles {
-  param (
-    [array]$EnvFiles,
-    [string]$BasePath,
-    [string]$Action,
-    [string]$Message,
-    [string]$ForegroundColor
-  )
+  $formattedPath = Format-EnvFilePath -Path $EnvFile -BasePath $BasePath
+  Write-Host "$Action .env file ${formattedPath}:" -ForegroundColor $ForegroundColor
 
-  if ($EnvFiles) {
-    $listOutput = "The following .env files were ${Message}:`n"
-    foreach ($envFile in $EnvFiles) {
-      $formattedPath = Format-EnvFilePath -Path $envFile -BasePath $BasePath
-      $listOutput += "$script:itemiser $formattedPath`n"
-    }
-    Write-Host $listOutput -ForegroundColor DarkGray
+  $lineNumber = 0
+  switch -Regex -File $EnvFile {
+    '^\s*#.*' { continue } # Skip comments
+    '^\s*$' { continue }   # Skip empty lines
 
-    foreach ($envFile in $EnvFiles) {
-      Format-EnvFile -EnvFile $envFile -BasePath $BasePath `
-        -Action $Action -ForegroundColor $ForegroundColor
+    '^([^=]+)=(.*)$' {
+      $lineNumber++
+      $varName = $Matches[1].Trim()
+      $varValue = $Matches[2].Trim()
+
+      $actionText = if ($Action -eq 'Load') {
+        [Environment]::SetEnvironmentVariable($varName, $varValue)
+        "Setting"
+      }
+      else {
+        [Environment]::SetEnvironmentVariable($varName, $null)
+        "Unsetting"
+      }
+
+      $color = if ($Action -eq 'Load') { 'Green' } else { 'Red' }
+      $fileUrl = "vscode://file/${EnvFile}:${lineNumber}"
+      $hyperlink = "$script:e]8;;$fileUrl$script:e\$varName$script:e]8;;$script:e\"
+
+      Write-Host "  $script:itemiser $actionText environment variable: " -NoNewline
+      Write-Host $hyperlink -ForegroundColor $color -NoNewline
+      Write-Host " (Line ${lineNumber})"
     }
   }
 }
 
 function Import-DotEnv {
-  param (
+  [CmdletBinding()]
+  param(
     [string]$Path = "."
   )
 
   try {
-    $resolvedPath = Resolve-Path -Path $Path -ErrorAction Stop
+    $resolvedPath = Convert-Path -Path $Path -ErrorAction Stop
   }
   catch {
-    $resolvedPath = (Get-Location).Path
+    $resolvedPath = $PWD.Path
   }
 
   $currentEnvFiles = Get-EnvFilesUpstream -Directory $resolvedPath
 
-  # Handle null/empty scenarios
-  $currentNormalized = @($currentEnvFiles | ForEach-Object { $_.ToLowerInvariant() })
-  $previousNormalized = @($script:previousEnvFiles | ForEach-Object { $_.ToLowerInvariant() })
-
-  # Create empty arrays if null
-  if ($null -eq $currentNormalized) { $currentNormalized = @() }
-  if ($null -eq $previousNormalized) { $previousNormalized = @() }
-
-  $comparison = Compare-Object -ReferenceObject $previousNormalized -DifferenceObject $currentNormalized
-
-  if ($comparison) {
-    # Unload all previous
-    if ($script:previousEnvFiles) {
-      Format-EnvFiles -EnvFiles $script:previousEnvFiles -BasePath $script:previousWorkingDirectory `
-        -Action "Unload" -Message "removed" -ForegroundColor Yellow
-    }
-
-    # Load new set
-    if ($currentEnvFiles) {
-      Format-EnvFiles -EnvFiles $currentEnvFiles -BasePath $resolvedPath `
-        -Action "Load" -Message "added" -ForegroundColor Cyan
-    }
-
-    $script:previousEnvFiles = $currentEnvFiles
-    $script:previousWorkingDirectory = $resolvedPath
+  # If Get-EnvFilesUpstream terminated unexpectedly (e.g., due to an internal error),
+  # $currentEnvFiles might be $null. Compare-Object requires a collection for -DifferenceObject.
+  if ($null -eq $currentEnvFiles) {
+    $currentEnvFiles = @() # Default to an empty array
   }
+  $comparison = Compare-Object -ReferenceObject $script:previousEnvFiles -DifferenceObject $currentEnvFiles
+
+  if (-not $comparison) {
+    return
+  }
+
+  # Unload previous environment files
+  if ($script:previousEnvFiles.Count -gt 0) {
+    Write-Host "`nUnloading previous environment configuration:" -ForegroundColor Yellow
+    foreach ($file in $script:previousEnvFiles) {
+      Format-EnvFile -EnvFile $file -BasePath $script:previousWorkingDirectory -Action Unload -ForegroundColor Yellow
+    }
+  }
+
+  # Load new environment files
+  if ($currentEnvFiles.Count -gt 0) {
+    Write-Host "`nLoading new environment configuration:" -ForegroundColor Cyan
+    foreach ($file in $currentEnvFiles) {
+      Format-EnvFile -EnvFile $file -BasePath $resolvedPath -Action Load -ForegroundColor Cyan
+    }
+  }
+
+  $script:previousEnvFiles = $currentEnvFiles
+  $script:previousWorkingDirectory = $resolvedPath
 }
 
 function Set-Location {
-  param (
+  [CmdletBinding()]
+  param(
+    [Parameter(Position = 0)]
     [string]$Path
   )
 
-  Microsoft.PowerShell.Management\Set-Location $Path
-  Import-DotEnv
+  Microsoft.PowerShell.Management\Set-Location -Path $Path
+  Import-DotEnv -Path $Path
 }
 
 Export-ModuleMember -Function Get-EnvFilesUpstream, Import-DotEnv, Set-Location
