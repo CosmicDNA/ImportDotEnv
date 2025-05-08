@@ -1,13 +1,16 @@
+using namespace System.IO
+using namespace System
+
 function Get-RelativePath {
   param (
     [string]$Path,
     [string]$BasePath
   )
 
-  $separator = [System.IO.Path]::DirectorySeparatorChar
+  $separator = [Path]::DirectorySeparatorChar
 
-  $absolutePath = [System.IO.Path]::GetFullPath($Path)
-  $absoluteBasePath = [System.IO.Path]::GetFullPath($BasePath)
+  $absolutePath = [Path]::GetFullPath($Path)
+  $absoluteBasePath = [Path]::GetFullPath($BasePath)
 
   $pathSegments = $absolutePath -split [regex]::Escape($separator)
   $basePathSegments = $absoluteBasePath -split [regex]::Escape($separator)
@@ -107,7 +110,7 @@ function Format-EnvFile {
           $actionText = "Unsetting"
         }
 
-        [System.Environment]::SetEnvironmentVariable($variableName, $valueToSet)
+        [Environment]::SetEnvironmentVariable($variableName, $valueToSet)
         $fileUrl = "vscode://file/${EnvFile}:$lineNumber"
         $hyperlink = "$script:e]8;;$fileUrl$script:e\$variableName$script:e]8;;$script:e\"
 
