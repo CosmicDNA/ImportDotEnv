@@ -5,6 +5,7 @@
 using namespace System.IO
 using namespace System.Management.Automation
 
+$script:originalEnvironmentVariables = @{} # Stores { VarName = OriginalValueOrNull }
 $script:previousEnvFiles = @()
 $script:previousWorkingDirectory = $PWD.Path
 $script:e = [char]27
@@ -92,7 +93,10 @@ function Get-EnvFilesUpstream {
     $currentDir = $parentDir
   }
 
-  [Array]::Reverse($envFiles)
+      if ($envFiles.Count -gt 0) {
+        [Array]::Reverse($envFiles)
+      }
+      # Ensure it always returns an array
   return $envFiles
 }
 
@@ -122,50 +126,44 @@ function Format-EnvFile {
   param(
     [Parameter(Mandatory)]
     [string]$EnvFile,
-
     [Parameter(Mandatory)]
-    [string]$BasePath,
-
-    [ValidateSet('Load', 'Unload')]
-    [string]$Action = 'Load',
-
-    [ConsoleColor]$ForegroundColor = 'Cyan'
+    [string]$BasePath
   )
 
+  # This function now only handles loading. Unloading/restoration is done in Import-DotEnv.
   if (-not (Test-Path -LiteralPath $EnvFile -PathType Leaf)) {
     return
   }
 
   $formattedPath = Format-EnvFilePath -Path $EnvFile -BasePath $BasePath
-  Write-Host "$Action .env file ${formattedPath}:" -ForegroundColor $ForegroundColor
+  Write-Host "Processing .env file ${formattedPath}:" -ForegroundColor Cyan
 
   $lineNumber = 0
   switch -Regex -File $EnvFile {
-    '^\s*#.*' { continue } # Skip comments
-    '^\s*$' { continue }   # Skip empty lines
+    '^\s*#.*' { $lineNumber++; continue } # Skip comments, count line
+    '^\s*$' { $lineNumber++; continue }   # Skip empty lines, count line
 
     '^([^=]+)=(.*)$' {
       $lineNumber++
       $varName = $Matches[1].Trim()
       $varValue = $Matches[2].Trim()
 
-      $actionText = if ($Action -eq 'Load') {
-        [Environment]::SetEnvironmentVariable($varName, $varValue)
-        "Setting"
+      # Store original value IF NOT ALREADY STORED FOR THIS LOAD CYCLE
+      if (-not $script:originalEnvironmentVariables.ContainsKey($varName)) {
+        $script:originalEnvironmentVariables[$varName] = [Environment]::GetEnvironmentVariable($varName)
+        Write-Host "  MODULE Format-EnvFile: Storing original value for '$varName': '$($script:originalEnvironmentVariables[$varName])'"
       }
-      else {
-        [Environment]::SetEnvironmentVariable($varName, $null)
-        "Unsetting"
-      }
+      [Environment]::SetEnvironmentVariable($varName, $varValue)
+      Write-Host "  MODULE Format-EnvFile: Set '$varName' to '$varValue'. Current value in env: '$([Environment]::GetEnvironmentVariable($varName))'"
 
-      $color = if ($Action -eq 'Load') { 'Green' } else { 'Red' }
       $fileUrl = "vscode://file/${EnvFile}:${lineNumber}"
       $hyperlink = "$script:e]8;;$fileUrl$script:e\$varName$script:e]8;;$script:e\"
 
-      Write-Host "  $script:itemiser $actionText environment variable: " -NoNewline
-      Write-Host $hyperlink -ForegroundColor $color -NoNewline
-      Write-Host " (Line ${lineNumber})"
+      Write-Host "  $script:itemiser Setting environment variable: " -NoNewline
+      Write-Host $hyperlink -ForegroundColor Green -NoNewline
+      Write-Host " (from line ${lineNumber})"
     }
+    default { $lineNumber++ } # Count other lines not matching the pattern
   }
 }
 
@@ -174,12 +172,14 @@ function Import-DotEnv {
   param(
     [string]$Path = "."
   )
+  Write-Host "MODULE Import-DotEnv: Called with Path '$Path'. Current PWD: $($PWD.Path)"
 
   try {
     $resolvedPath = Convert-Path -Path $Path -ErrorAction Stop
   }
   catch {
     $resolvedPath = $PWD.Path
+    Write-Host "MODULE Import-DotEnv: Path '$Path' resolved to PWD '$resolvedPath' due to error: $($_.Exception.Message)"
   }
 
   $currentEnvFiles = Get-EnvFilesUpstream -Directory $resolvedPath
@@ -187,43 +187,73 @@ function Import-DotEnv {
   # If Get-EnvFilesUpstream terminated unexpectedly (e.g., due to an internal error),
   # $currentEnvFiles might be $null. Compare-Object requires a collection for -DifferenceObject.
   if ($null -eq $currentEnvFiles) {
+    Write-Host "MODULE Import-DotEnv: Get-EnvFilesUpstream returned null for '$resolvedPath'. Defaulting to empty array."
     $currentEnvFiles = @() # Default to an empty array
   }
-  $comparison = Compare-Object -ReferenceObject $script:previousEnvFiles -DifferenceObject $currentEnvFiles
+  Write-Host "MODULE Import-DotEnv: Resolved path '$resolvedPath'. Found $($currentEnvFiles.Count) .env files upstream: $($currentEnvFiles -join ', ')"
+  Write-Host "MODULE Import-DotEnv: Previous files count: $($script:previousEnvFiles.Count) ('$($script:previousEnvFiles -join ', ')'). Previous PWD: '$($script:previousWorkingDirectory)'"
 
-  if (-not $comparison) {
+  $comparison = Compare-Object -ReferenceObject $script:previousEnvFiles -DifferenceObject $currentEnvFiles
+  if (-not $comparison -and $script:previousWorkingDirectory -eq $resolvedPath) {
+    Write-Host "MODULE Import-DotEnv: No changes detected for '$resolvedPath'. Returning."
     return
   }
 
-  # Unload previous environment files
-  if ($script:previousEnvFiles.Count -gt 0) {
-    Write-Host "`nUnloading previous environment configuration:" -ForegroundColor Yellow
-    foreach ($file in $script:previousEnvFiles) {
-      Format-EnvFile -EnvFile $file -BasePath $script:previousWorkingDirectory -Action Unload -ForegroundColor Yellow
+  # --- Unload Phase: Restore variables managed by the previous state ---
+  if ($script:originalEnvironmentVariables.Count -gt 0) { # This check might be too simple if we always want to clear
+    Write-Host "`nRestoring environment from previous configuration:" -ForegroundColor Yellow
+    # Clone keys because we might be modifying the collection if we were to remove, though here we just clear after.
+    $varsToRestore = $script:originalEnvironmentVariables.Keys | ForEach-Object { $_ }
+    foreach ($varName in $varsToRestore) {
+      $originalValue = $script:originalEnvironmentVariables[$varName]
+      [Environment]::SetEnvironmentVariable($varName, $originalValue) # This correctly unsets if $originalValue is $null
+
+      # Construct a hyperlink that could trigger a search in VS Code for the variable name
+      $searchUrl = "vscode://search/search?query=$([System.Uri]::EscapeDataString($varName))"
+      $hyperlinkedVarName = "$script:e]8;;$searchUrl$script:e\$varName$script:e]8;;$script:e\"
+
+      $restoredActionText = if ($null -eq $originalValue) { "Unset" } else { "Restored to '$originalValue'" }
+      Write-Host "  $script:itemiser $restoredActionText environment variable: " -NoNewline
+      Write-Host $hyperlinkedVarName -ForegroundColor Yellow
     }
   }
+  $script:originalEnvironmentVariables.Clear() # Prepare for the new state
 
-  # Load new environment files
+  # --- Load Phase ---
   if ($currentEnvFiles.Count -gt 0) {
+    Write-Host "MODULE Import-DotEnv (Load Phase): Entering load phase."
+    Write-Host "MODULE Import-DotEnv (Load Phase): currentEnvFiles Type: $($currentEnvFiles.GetType().FullName)"
+    Write-Host "MODULE Import-DotEnv (Load Phase): currentEnvFiles Content: $($currentEnvFiles | Out-String)"
+    Write-Host "MODULE Import-DotEnv (Load Phase): About to loop through $($currentEnvFiles.Count) files."
     Write-Host "`nLoading new environment configuration:" -ForegroundColor Cyan
     foreach ($file in $currentEnvFiles) {
-      Format-EnvFile -EnvFile $file -BasePath $resolvedPath -Action Load -ForegroundColor Cyan
+      Write-Host "MODULE Import-DotEnv (Load Phase): Processing file '$file'"
+
+      # Format-EnvFile now handles populating $script:originalEnvironmentVariables and setting new values.
+      Format-EnvFile -EnvFile $file -BasePath $resolvedPath
     }
   }
 
   $script:previousEnvFiles = $currentEnvFiles
   $script:previousWorkingDirectory = $resolvedPath
 }
+# Set-Location is already exported by the .psd1 if it's defined in the .psm1
+# Ensure it's defined if not already. If it was previously here and removed, it should be added back.
+# Assuming Set-Location is defined as it was:
 
 function Set-Location {
-  [CmdletBinding()]
-  param(
-    [Parameter(Position = 0)]
-    [string]$Path
-  )
+    [CmdletBinding()]
+    param(
+        [Parameter(Position = 0)]
+        [string]$Path
+    )
+    Write-Host "MODULE Set-Location: OVERRIDE CALLED with Path '$Path'. Current PWD before MSFT Set-Location: $($PWD.Path)"
 
-  Microsoft.PowerShell.Management\Set-Location -Path $Path
-  Import-DotEnv -Path $Path
+    Microsoft.PowerShell.Management\Set-Location -Path $Path # This changes $PWD
+    Write-Host "MODULE Set-Location: After MSFT Set-Location. New PWD: $($PWD.Path). Calling Import-DotEnv for original target Path '$Path'."
+    $filesFoundBySetLocation = Get-EnvFilesUpstream -Directory $Path
+    Write-Host "MODULE Set-Location: Get-EnvFilesUpstream for '$Path' found: $($filesFoundBySetLocation -join ', ')"
+    Import-DotEnv -Path $Path # Call with the original target path
 }
 
 Export-ModuleMember -Function Get-EnvFilesUpstream, Import-DotEnv, Set-Location
