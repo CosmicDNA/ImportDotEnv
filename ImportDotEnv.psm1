@@ -373,7 +373,13 @@ function Enable-ImportDotEnvCdIntegration {
   Write-Host "To disable, run 'Disable-ImportDotEnvCdIntegration'." -ForegroundColor Yellow
 
   # The target for the alias is the fully qualified name of our wrapper function
-  $wrapperFunctionFullName = "ImportDotEnv\Invoke-ImportDotEnvSetLocationWrapper"
+  $currentModuleNameForEnable = $MyInvocation.MyCommand.Module.Name # Use a distinct variable name
+  if (-not $currentModuleNameForEnable) {
+    Write-Error "Enable-ImportDotEnvCdIntegration: Could not determine current module name. Aborting."
+    return
+  }
+  $wrapperFunctionFullName = "$currentModuleNameForEnable\Invoke-ImportDotEnvSetLocationWrapper"
+  Write-Debug "Enable-ImportDotEnvCdIntegration: Determined wrapper function full name: '$wrapperFunctionFullName'"
 
   # --- Phase 1: Cleanup existing commands ---
   Write-Debug "Enable-ImportDotEnvCdIntegration: Phase 1 - Cleanup"
@@ -407,41 +413,26 @@ function Enable-ImportDotEnvCdIntegration {
 
   Set-Alias -Name Set-Location -Value $wrapperFunctionFullName -Scope Global -Force -Option ReadOnly, AllScope
 
-  # For cd and sl, define them as global functions that call the wrapper.
-  # This is often more robust for overriding built-in aliases.
-  # The scriptblock uses the fully qualified name to ensure it calls the correct function.
-  # Ensure the function is ReadOnly and AllScope to mimic alias behavior.
-  Write-Debug "Enable-ImportDotEnvCdIntegration: Defining 'cd' as function."
-  $cdFunctionScriptBlock = New-SetLocationWrapperScriptBlock -TargetFunctionFullName $wrapperFunctionFullName
+  # For 'cd' and 'sl', make them aliases to the wrapper, similar to Set-Location.
+  # This simplifies cleanup compared to defining them as functions.
+  foreach ($aliasCmdName in @('cd', 'sl')) {
+    Write-Debug "Enable-ImportDotEnvCdIntegration: Defining '$aliasCmdName' as alias to '$wrapperFunctionFullName'."
+    Write-Debug "Enable-ImportDotEnvCdIntegration: Pre-Set-Alias cleanup for '$aliasCmdName'. Current state: $(Get-Command $aliasCmdName -ErrorAction SilentlyContinue | Select-Object Name, CommandType, Definition | Format-List | Out-String)"
+    # Remove any existing alias or function for this command name
+    Remove-Alias -Name $aliasCmdName -Scope Global -Force -ErrorAction SilentlyContinue
+    Remove-Item "Function:\Global:$aliasCmdName" -Force -ErrorAction SilentlyContinue
 
-  # Extremely explicit cleanup for 'cd' right before defining it as a function
-  Write-Debug "Enable-ImportDotEnvCdIntegration: Pre-Set-Item cleanup for 'cd'. Current state: $(Get-Command cd -ErrorAction SilentlyContinue | Select-Object Name, CommandType, Definition | Format-List | Out-String)"
-  Remove-Alias -Name cd -Scope Global -Force -ErrorAction SilentlyContinue
-  Remove-Item Function:\Global:cd -Force -ErrorAction SilentlyContinue
-  Write-Debug "Enable-ImportDotEnvCdIntegration: Post-explicit-cleanup for 'cd'. Current state: $(Get-Command cd -ErrorAction SilentlyContinue | Select-Object Name, CommandType, Definition | Format-List | Out-String)"
-
-  # Special handling for 'cd' due to its stickiness
-  $currentCd = Get-Command cd -ErrorAction SilentlyContinue
-  if ($currentCd -and $currentCd.CommandType -eq [System.Management.Automation.CommandTypes]::Alias) {
-    Write-Debug "Enable-ImportDotEnvCdIntegration: 'cd' is an alias. Removing it before defining function."
-    Remove-Alias -Name cd -Scope Global -Force -ErrorAction SilentlyContinue
-  }
-  try {
-    Set-Item -Path "Function:\Global:cd" -Value $cdFunctionScriptBlock -Force -Options ReadOnly, AllScope -ErrorAction Stop | Out-Null
-    Write-Debug "Enable-ImportDotEnvCdIntegration: Successfully Set-Item Function:\Global:cd. Current 'cd' type: $((Get-Command cd -ErrorAction SilentlyContinue).CommandType)"
-  } catch {
-    Write-Error "Enable-ImportDotEnvCdIntegration: FAILED to Set-Item Function:\Global:cd. Error: $($_.Exception.Message)"
-    $cdAfterFail = Get-Command cd -ErrorAction SilentlyContinue
-    Write-Debug "Enable-ImportDotEnvCdIntegration: Current 'cd' type after failed Set-Item: $($cdAfterFail.CommandType), Definition: $($cdAfterFail.Definition)"
+    Set-Alias -Name $aliasCmdName -Value $wrapperFunctionFullName -Scope Global -Force -Option ReadOnly,AllScope
+    Write-Debug "Enable-ImportDotEnvCdIntegration: Successfully Set-Alias '$aliasCmdName' to '$wrapperFunctionFullName'. Current '$aliasCmdName' type: $((Get-Command $aliasCmdName -ErrorAction SilentlyContinue).CommandType)"
+    if ($aliasCmdName -eq 'cd') {
+        $cdCmdDetailsAfterEnable = Get-Command cd -ErrorAction SilentlyContinue
+        Write-Host "INFO: 'cd' (Alias) details - Name: $($cdCmdDetailsAfterEnable.Name), Type: $($cdCmdDetailsAfterEnable.CommandType), Definition: $($cdCmdDetailsAfterEnable.Definition), Options: $($cdCmdDetailsAfterEnable.Options)" -ForegroundColor DarkGray
+    }
   }
 
-  Write-Debug "Enable-ImportDotEnvCdIntegration: Defining 'sl' as alias."
-  # Change: Make 'sl' an alias directly to the wrapper, similar to Set-Location
-  Write-Debug "Enable-ImportDotEnvCdIntegration: Pre-Set-Item cleanup for 'sl'. Current state: $(Get-Command sl -ErrorAction SilentlyContinue | Select-Object Name, CommandType, Definition | Format-List | Out-String)"
-  Remove-Alias -Name sl -Scope Global -Force -ErrorAction SilentlyContinue
-  Remove-Item Function:\Global:sl -Force -ErrorAction SilentlyContinue
-  Set-Alias -Name sl -Value $wrapperFunctionFullName -Scope Global -Force -Option ReadOnly,AllScope
-  Write-Debug "Enable-ImportDotEnvCdIntegration: Successfully Set-Alias 'sl' to '$wrapperFunctionFullName'. Current 'sl' type: $((Get-Command sl -ErrorAction SilentlyContinue).CommandType)"
+  # Process .env files for the current directory immediately upon enabling
+  Write-Debug "Enable-ImportDotEnvCdIntegration: Processing .env for current directory: $($PWD.Path)"
+  Import-DotEnv -Path $PWD.Path
 
   Write-Host "ImportDotEnv 'Set-Location', 'cd', 'sl' integration enabled!" -ForegroundColor Green
 }
@@ -451,35 +442,53 @@ function Disable-ImportDotEnvCdIntegration {
   param()
 
   Write-Host "Disabling ImportDotEnv integration for 'Set-Location', 'cd', and 'sl'..." -ForegroundColor Yellow
-
-  $wrapperFunctionFullName = "ImportDotEnv\Invoke-ImportDotEnvSetLocationWrapper"
-  $restoredDefaultAliases = $false
+  $currentModuleName = $MyInvocation.MyCommand.Module.Name
+  if (-not $currentModuleName) {
+    # This can happen if the function is dot-sourced or called in a way that $MyInvocation.MyCommand.Module is not populated.
+    # Fallback to a hardcoded name, or error out if strictness is required.
+    Write-Warning "Disable-ImportDotEnvCdIntegration: Could not determine current module name dynamically. Falling back to 'ImportDotEnv'."
+    $currentModuleName = "ImportDotEnv" # Fallback assumption
+  }
+  $wrapperFunctionFullName = "$currentModuleName\Invoke-ImportDotEnvSetLocationWrapper"
+  $proxiesRemoved = $false # Renamed for clarity
 
   # Phase 1: Remove our specific proxies if they exist
   Write-Debug "Disable-ImportDotEnvCdIntegration: Phase 1 - Removing proxies."
 
   # For Set-Location (was an alias to our wrapper)
-  $cmdInfo = Get-Command "Set-Location" -ErrorAction SilentlyContinue
-  if ($cmdInfo -and $cmdInfo.CommandType -eq [System.Management.Automation.CommandTypes]::Alias -and $cmdInfo.Definition -eq $wrapperFunctionFullName) {
+  $slCmdInfoForDisable = Get-Command "Set-Location" -ErrorAction SilentlyContinue
+  Write-Debug "Disable-ImportDotEnvCdIntegration: Checking Set-Location. Found: Type '$($slCmdInfoForDisable.CommandType)', Definition '$($slCmdInfoForDisable.Definition)'. Expected Wrapper: '$wrapperFunctionFullName'."
+  if ($slCmdInfoForDisable -and $slCmdInfoForDisable.CommandType -eq [System.Management.Automation.CommandTypes]::Alias -and $slCmdInfoForDisable.Definition -eq $wrapperFunctionFullName) {
     Remove-Alias -Name "Set-Location" -Scope Global -Force -ErrorAction SilentlyContinue
     Write-Debug " - 'Set-Location' (ImportDotEnv alias proxy) removed."
-    $restoredDefaultAliases = $true # Indicate that we made a change
+    $proxiesRemoved = $true
   }
 
   # For cd (was a function calling our wrapper)
-  $cmdInfo = Get-Command "cd" -ErrorAction SilentlyContinue
-  if ($cmdInfo -and $cmdInfo.CommandType -eq [System.Management.Automation.CommandTypes]::Function -and $cmdInfo.ScriptBlock.ToString() -match ([regex]::Escape($wrapperFunctionFullName))) {
+  $cdCmdInfoForDisable = Get-Command "cd" -ErrorAction SilentlyContinue
+  Write-Debug "Disable-ImportDotEnvCdIntegration: Checking 'cd' (Phase 1). Found: Name '$($cdCmdInfoForDisable.Name)', Type '$($cdCmdInfoForDisable.CommandType)', Module: '$($cdCmdInfoForDisable.Module.Name)', Options: '$($cdCmdInfoForDisable.Options)'."
+  if ($cdCmdInfoForDisable -and $cdCmdInfoForDisable.CommandType -eq [System.Management.Automation.CommandTypes]::Function) {
+    Write-Debug "Disable-ImportDotEnvCdIntegration: 'cd' is a function. ScriptBlock (first 100 chars): $($cdCmdInfoForDisable.ScriptBlock.ToString().Substring(0, [System.Math]::Min(100, $cdCmdInfoForDisable.ScriptBlock.ToString().Length)))"
+    Write-Debug "Disable-ImportDotEnvCdIntegration: Comparing with regex for wrapper: $([regex]::Escape($wrapperFunctionFullName))"
+  }
+
+  if ($cdCmdInfoForDisable -and $cdCmdInfoForDisable.CommandType -eq [System.Management.Automation.CommandTypes]::Function -and $cdCmdInfoForDisable.ScriptBlock.ToString() -match ([regex]::Escape($wrapperFunctionFullName))) {
+    Write-Debug "Disable-ImportDotEnvCdIntegration: 'cd' function matches wrapper. Attempting Remove-Item Function:\Global:cd."
     Remove-Item "Function:\Global:cd" -Force -ErrorAction SilentlyContinue
     Write-Debug " - 'cd' (ImportDotEnv function proxy) removed."
-    $restoredDefaultAliases = $true # Indicate that we made a change
+    $proxiesRemoved = $true
+  } else {
+    if ($cdCmdInfoForDisable -and $cdCmdInfoForDisable.CommandType -eq [System.Management.Automation.CommandTypes]::Function) {
+        Write-Warning "Disable-ImportDotEnvCdIntegration: 'cd' is a function, but its scriptblock did not match the expected wrapper in Phase 1. It will be targeted for removal in Phase 2 if it's still a function then."
+    }
   }
 
   # For sl (was an alias to our wrapper)
-  $cmdInfo = Get-Command "sl" -ErrorAction SilentlyContinue
-  if ($cmdInfo -and $cmdInfo.CommandType -eq [System.Management.Automation.CommandTypes]::Alias -and $cmdInfo.Definition -eq $wrapperFunctionFullName) {
+  $slCmdInfoForDisableSl = Get-Command "sl" -ErrorAction SilentlyContinue # Renamed to avoid conflict
+  if ($slCmdInfoForDisableSl -and $slCmdInfoForDisableSl.CommandType -eq [System.Management.Automation.CommandTypes]::Alias -and $slCmdInfoForDisableSl.Definition -eq $wrapperFunctionFullName) {
     Remove-Alias -Name "sl" -Scope Global -Force -ErrorAction SilentlyContinue
     Write-Debug " - 'sl' (ImportDotEnv alias proxy) removed."
-    $restoredDefaultAliases = $true # Indicate that we made a change
+    $proxiesRemoved = $true
   }
 
   # Phase 2: Ensure default states are robustly restored
@@ -501,12 +510,26 @@ function Disable-ImportDotEnvCdIntegration {
 
   # Ensure cd and sl are aliases pointing to Set-Location
   foreach ($aliasName in @("cd", "sl")) {
-    Write-Debug "Disable-ImportDotEnvCdIntegration: Restoring '$aliasName' as alias to Set-Location."
+    Write-Debug "Disable-ImportDotEnvCdIntegration: Restoring '$aliasName' as alias to Set-Location (Phase 2)."
+    $cmdBeforeRestore = Get-Command $aliasName -ErrorAction SilentlyContinue
+    Write-Debug "Disable-ImportDotEnvCdIntegration: State of '$aliasName' before Phase 2 restoration: Type '$($cmdBeforeRestore.CommandType)', Def/Module '$($cmdBeforeRestore.Definition)/$($cmdBeforeRestore.Module.Name)', Options '$($cmdBeforeRestore.Options)'"
+
     # Remove any function that might be named $aliasName
+    if ($cmdBeforeRestore.CommandType -eq [System.Management.Automation.CommandTypes]::Function -and $cmdBeforeRestore.Options -match 'ReadOnly') {
+        Write-Debug "Disable-ImportDotEnvCdIntegration: Clearing ReadOnly option from function '$aliasName' before removal."
+        Set-Item "Function:\Global:$aliasName" -Options None -Force -ErrorAction SilentlyContinue
+    }
     Remove-Item "Function:\Global:$aliasName" -Force -ErrorAction SilentlyContinue
+    # Explicit check if the function was actually removed
+    $functionStillExists = Get-Command $aliasName -CommandType Function -ErrorAction SilentlyContinue
+    if ($functionStillExists) {
+        Write-Warning "Disable-ImportDotEnvCdIntegration: Function '$($functionStillExists.Name)' (Type: $($functionStillExists.CommandType), Module: $($functionStillExists.Module.Name), Options: $($functionStillExists.Options)) STILL EXISTS after Remove-Item in Phase 2 for alias '$aliasName'."
+    } else {
+        Write-Debug "Disable-ImportDotEnvCdIntegration: Function for '$aliasName' confirmed REMOVED after Remove-Item in Phase 2."
+    }
     # Set the alias
     Set-Alias -Name $aliasName -Value "Set-Location" -Scope Global -Option AllScope -Force -ErrorAction SilentlyContinue
-    $finalAlias = Get-Command $aliasName -ErrorAction SilentlyContinue
+    $finalAlias = Get-Command $aliasName -ErrorAction SilentlyContinue # Re-fetch after attempting to set alias
     if ($null -eq $finalAlias) {
         Write-Warning " - CRITICAL: '$aliasName' command is missing after attempting to restore default alias."
     } elseif ($finalAlias.CommandType -ne [System.Management.Automation.CommandTypes]::Alias -or $finalAlias.Definition -ne "Set-Location") {
@@ -516,13 +539,43 @@ function Disable-ImportDotEnvCdIntegration {
     }
   }
 
-  if ($restoredDefaultAliases) {
-    $predicate = "disabled, default command behavior restored"
-    # Write-Host "ImportDotEnv 'Set-Location' integration disabled. Default command behavior restored."
-  } else {
-    $predicate = "was not active or already disabled"
+  # --- Unload any currently active .env variables ---
+  $variablesUnloaded = $false
+  if ($script:originalEnvironmentVariables.Count -gt 0) {
+    Write-Host "`nUnloading active .env variables as integration is being disabled:" -ForegroundColor Yellow
+    $varsToRestore = $script:originalEnvironmentVariables.Keys | ForEach-Object { $_ } # Clone keys
+    foreach ($varName in $varsToRestore) {
+      $originalValue = $script:originalEnvironmentVariables[$varName]
+      if ($null -eq $originalValue) {
+        Write-Debug "MODULE Disable-ImportDotEnvCdIntegration (Unload): Restoring '$varName' to non-existent."
+        [Environment]::SetEnvironmentVariable($varName, $null)
+        if (Test-Path "Env:\$varName") { Remove-Item "Env:\$varName" -Force -ErrorAction SilentlyContinue }
+      } else {
+        Write-Debug "MODULE Disable-ImportDotEnvCdIntegration (Unload): Restoring '$varName' to '$originalValue'."
+        [Environment]::SetEnvironmentVariable($varName, $originalValue)
+      }
+      $searchUrl = "vscode://search/search?query=$([System.Uri]::EscapeDataString($varName))"
+      $hyperlinkedVarName = "$script:e]8;;$searchUrl$script:e\$varName$script:e]8;;$script:e\"
+      $restoredActionText = if ($null -eq $originalValue) { "Unset" } else { "Restored" }
+      Write-Host "  $script:itemiser $restoredActionText environment variable: " -NoNewline
+      Write-Host $hyperlinkedVarName -ForegroundColor Yellow
+    }
+    $script:originalEnvironmentVariables.Clear()
+    $script:previousEnvFiles = @()
+    $script:previousWorkingDirectory = "RESET_BY_DISABLE_INTEGRATION_HOOK" # Distinct marker
+    Write-Debug "MODULE Disable-ImportDotEnvCdIntegration: Cleared originalEnvironmentVariables and reset previousEnvFiles/previousWorkingDirectory."
+    $variablesUnloaded = $true
   }
-  Write-Host "ImportDotEnv 'Set-Location' integration ${predicate}!" -ForegroundColor Magenta
+
+  # Final message
+  if ($proxiesRemoved) {
+    Write-Host "ImportDotEnv 'Set-Location' integration disabled, default command behavior restored." -ForegroundColor Magenta
+  } else {
+    Write-Host "ImportDotEnv 'Set-Location' integration was not active or already disabled." -ForegroundColor Magenta
+  }
+  if ($variablesUnloaded) {
+      Write-Host "Any active .env variables have been unloaded." -ForegroundColor Magenta
+  }
 }
 
 Export-ModuleMember -Function Import-DotEnv,
