@@ -150,8 +150,15 @@ function Format-EnvFile {
 
       # Store original value IF NOT ALREADY STORED FOR THIS LOAD CYCLE
       if (-not $script:originalEnvironmentVariables.ContainsKey($varName)) {
-        $script:originalEnvironmentVariables[$varName] = [Environment]::GetEnvironmentVariable($varName)
-        Write-Debug "MODULE Format-EnvFile: Storing original value for '$varName': '$($script:originalEnvironmentVariables[$varName])'"
+        # If the variable doesn't exist according to Test-Path, its original state is $null.
+        # Otherwise, capture its current value (which could be an empty string).
+        if (-not (Test-Path "Env:\$varName")) {
+          $script:originalEnvironmentVariables[$varName] = $null
+          Write-Debug "MODULE Format-EnvFile: Storing original value for '$varName' as `$null (Test-Path was false)."
+        } else {
+          $script:originalEnvironmentVariables[$varName] = [Environment]::GetEnvironmentVariable($varName)
+          Write-Debug "MODULE Format-EnvFile: Storing original value for '$varName': '$($script:originalEnvironmentVariables[$varName])' (Test-Path was true)."
+        }
       }
       [Environment]::SetEnvironmentVariable($varName, $varValue)
       Write-Debug "MODULE Format-EnvFile: Set '$varName' to '$varValue'. Current value in env: '$([Environment]::GetEnvironmentVariable($varName))'"
@@ -208,8 +215,8 @@ function Import-DotEnv {
     foreach ($varName in $varsToRestore) {
       $originalValue = $script:originalEnvironmentVariables[$varName]
       # Explicitly handle $null for unsetting
-      Write-Debug "MODULE Import-DotEnv (Unload): Restoring '$varName'. Original value was type: $($originalValue.GetType().Name), IsNull: $($null -eq $originalValue), Value: '$originalValue'"
       if ($null -eq $originalValue) {
+        Write-Debug "MODULE Import-DotEnv (Unload): Restoring '$varName'. Original value was type: null, IsNull: $true, Value: '$originalValue'"
         Write-Debug "MODULE Import-DotEnv (Unload): Calling [Environment]::SetEnvironmentVariable('$varName', `$null) to remove it."
         [Environment]::SetEnvironmentVariable($varName, $null)
         # Also try to remove it via PowerShell's provider to be sure
@@ -217,6 +224,7 @@ function Import-DotEnv {
             Remove-Item "Env:\$varName" -Force -ErrorAction SilentlyContinue
         }
       } else {
+        Write-Debug "MODULE Import-DotEnv (Unload): Restoring '$varName'. Original value was type: $($originalValue.GetType().Name), IsNull: $($null -eq $originalValue), Value: '$originalValue'"
         Write-Debug "MODULE Import-DotEnv (Unload): Calling [Environment]::SetEnvironmentVariable('$varName', '$originalValue') to restore it."
         [Environment]::SetEnvironmentVariable($varName, $originalValue)
       }
@@ -267,13 +275,78 @@ function Invoke-ImportDotEnvSetLocationWrapper {
         [string]$StackName
     )
 
+    $slArgs = @{}
+
+    # Determine the parameter set used for the wrapper and add appropriate parameters
+    if ($PSCmdlet.ParameterSetName -eq 'Path') {
+        # Add Path only if it was explicitly bound.
+        # Set-Location can be called with no arguments (goes to home) or with a path resolving to a PSDrive.
+        # If $Path was bound (even to $null or empty string from an expression), it should be in $PSBoundParameters.
+        if ($PSBoundParameters.ContainsKey('Path')) {
+            $slArgs.Path = $Path
+        }
+    }
+    elseif ($PSCmdlet.ParameterSetName -eq 'LiteralPath') {
+        # LiteralPath is mandatory in its set, so it will always be in $PSBoundParameters if this set is used.
+        $slArgs.LiteralPath = $LiteralPath
+    }
+
+    # Add optional parameters if they were bound
+    if ($PSBoundParameters.ContainsKey('PassThru')) {
+        $slArgs.PassThru = $PassThru # $PassThru is a switch, its value will be $true if present
+    }
+    if ($PSBoundParameters.ContainsKey('StackName')) {
+        $slArgs.StackName = $StackName
+    }
+
+    # Forward common parameters if they were used on the wrapper
+    $CommonParameters = @('Verbose', 'Debug', 'ErrorAction', 'ErrorVariable', 'WarningAction', 'WarningVariable',
+                          'OutBuffer', 'OutVariable', 'PipelineVariable', 'InformationAction', 'InformationVariable')
+    foreach ($commonParam in $CommonParameters) {
+        if ($PSBoundParameters.ContainsKey($commonParam)) {
+            $slArgs[$commonParam] = $PSBoundParameters[$commonParam]
+        }
+    }
+    # Handle SupportsShouldProcess common parameters
+    if ($PSBoundParameters.ContainsKey('WhatIf')) { $slArgs.WhatIf = $PSBoundParameters.WhatIf }
+    if ($PSBoundParameters.ContainsKey('Confirm')) { $slArgs.Confirm = $PSBoundParameters.Confirm }
+
+    # Pre-calculate the debug string to avoid complex expressions directly in Write-Debug
+    # Also, correctly iterate hashtable key-value pairs using GetEnumerator()
+    $debugArgsString = ($slArgs.GetEnumerator() | ForEach-Object { "$($_.Key): $($_.Value)" } | Sort-Object) -join '; '
+    Write-Debug "Invoke-ImportDotEnvSetLocationWrapper: Calling Microsoft.PowerShell.Management\Set-Location with args: $debugArgsString"
     # Call the original Set-Location cmdlet
     # Ensure we call the cmdlet from the Microsoft.PowerShell.Management module
     # to avoid recursion if Set-Location is aliased to this wrapper.
-    Microsoft.PowerShell.Management\Set-Location @PSBoundParameters
-
+    Microsoft.PowerShell.Management\Set-Location @slArgs
     # Call our custom logic
     Import-DotEnv -Path $PWD.Path
+}
+
+# Helper function to create the scriptblock for cd/sl wrappers
+function New-SetLocationWrapperScriptBlock {
+  param([string]$TargetFunctionFullName)
+
+  # This scriptblock defines a function that correctly captures Set-Location's parameters
+  # and forwards them to the target function (Invoke-ImportDotEnvSetLocationWrapper).
+  return [scriptblock]::Create(@"
+[CmdletBinding(DefaultParameterSetName='Path', SupportsShouldProcess=`$true, ConfirmImpact='Medium')]
+param(
+    [Parameter(ParameterSetName='Path', Position=0, ValueFromPipeline, ValueFromPipelineByPropertyName)]
+    [string]`$Path,
+
+    [Parameter(ParameterSetName='LiteralPath', Mandatory, ValueFromPipelineByPropertyName)]
+    [Alias('PSPath')]
+    [string]`$LiteralPath,
+
+    [Parameter()]
+    [switch]`$PassThru,
+
+    [Parameter()]
+    [string]`$StackName
+)
+& "$TargetFunctionFullName" @PSBoundParameters
+"@)
 }
 
 function Enable-ImportDotEnvCdIntegration {
@@ -320,7 +393,7 @@ function Enable-ImportDotEnvCdIntegration {
   # The scriptblock uses the fully qualified name to ensure it calls the correct function.
   # Ensure the function is ReadOnly and AllScope to mimic alias behavior.
   Write-Debug "Enable-ImportDotEnvCdIntegration: Defining 'cd' as function."
-  $cdFunctionScriptBlock = [scriptblock]::Create("$wrapperFunctionFullName @PSBoundParameters")
+  $cdFunctionScriptBlock = New-SetLocationWrapperScriptBlock -TargetFunctionFullName $wrapperFunctionFullName
 
   # Extremely explicit cleanup for 'cd' right before defining it as a function
   Write-Debug "Enable-ImportDotEnvCdIntegration: Pre-Set-Item cleanup for 'cd'. Current state: $(Get-Command cd -ErrorAction SilentlyContinue | Select-Object Name, CommandType, Definition | Format-List | Out-String)"
@@ -344,7 +417,7 @@ function Enable-ImportDotEnvCdIntegration {
   }
 
   Write-Debug "Enable-ImportDotEnvCdIntegration: Defining 'sl' as function."
-  $slFunctionScriptBlock = [scriptblock]::Create("$wrapperFunctionFullName @PSBoundParameters")
+  $slFunctionScriptBlock = New-SetLocationWrapperScriptBlock -TargetFunctionFullName $wrapperFunctionFullName
   Set-Item -Path "Function:\Global:sl" -Value $slFunctionScriptBlock -Force -Options ReadOnly, AllScope | Out-Null # Use Set-Item
 
 

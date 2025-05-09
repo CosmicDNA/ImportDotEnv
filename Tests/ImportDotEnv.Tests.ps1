@@ -75,7 +75,14 @@ InModuleScope 'ImportDotEnv' {
         BeforeEach { # Runs before each It in this Describe block
             $testVarNames = @("TEST_VAR_GLOBAL", "TEST_VAR_A", "TEST_VAR_BASE", "TEST_VAR_OVERRIDE", "TEST_VAR_SUB", "NEW_VAR", "TEST_EMPTY_VAR", "PROJECT_ID")
             foreach ($varName in $testVarNames) {
-                [Environment]::SetEnvironmentVariable($varName, $Global:InitialEnvironment[$varName])
+                $initialVal = $Global:InitialEnvironment[$varName]
+                if ($null -eq $initialVal) {
+                    # Ensure it's truly non-existent if its initial state was null.
+                    # Remove-Item is the most reliable way to ensure GetEnvironmentVariable returns $null.
+                    if (Test-Path "Env:\$varName") { Remove-Item "Env:\$varName" -Force -ErrorAction SilentlyContinue }
+                } else {
+                    [Environment]::SetEnvironmentVariable($varName, $initialVal)
+                }
             }
             Write-Host "BeforeEach (Start): Environment variables reset."
             # Ensure TestRoot is accessible. It should be inherited from BeforeAll's $script: scope.
@@ -259,7 +266,6 @@ InModuleScope 'ImportDotEnv' {
 
             It "loads variables from .env and restores global on exit" {
                 [Environment]::SetEnvironmentVariable("TEST_VAR_GLOBAL", "initial_global_val")
-                [Environment]::SetEnvironmentVariable("TEST_VAR_A", $null) # Ensure it's not set
                 Set-Location $script:DirA.FullName
 
                 [Environment]::GetEnvironmentVariable("TEST_VAR_A") | Should -Be "valA"
@@ -270,21 +276,8 @@ InModuleScope 'ImportDotEnv' {
 
                 $expectedVarA = if ($Global:InitialEnvironment.ContainsKey("TEST_VAR_A")) { $Global:InitialEnvironment["TEST_VAR_A"] } else { $null }
                 $actualVarA = [Environment]::GetEnvironmentVariable("TEST_VAR_A")
-                Write-Host "TEST SCRIPT: Checking TEST_VAR_A. Expected: '$expectedVarA' (IsNull: $($null -eq $expectedVarA)). Actual: '$actualVarA' (IsNull: $($null -eq $actualVarA), Type: $($actualVarA.GetType().Name))"
-                # Accommodate Pester environment where $null might be read as ""
-                $actualVarA | Should -Satisfy {
-                    param($pipedValue)
-                    $conditionMet = $false
-                    if ($null -eq $expectedVarA) {
-                        # Expected to be unset
-                        $conditionMet = ($null -eq $pipedValue -or $pipedValue -eq "")
-                    }
-                    else {
-                        # Expected to be a specific value
-                        $conditionMet = ($pipedValue -eq $expectedVarA)
-                    }
-                    $conditionMet
-                } # Removed custom message
+                Write-Host "TEST SCRIPT: Checking TEST_VAR_A. Expected: '$expectedVarA' (IsNull: $($null -eq $expectedVarA)). Actual: '$actualVarA' (IsNull: $($null -eq $actualVarA), Type: $(if ($null -ne $actualVarA) { $actualVarA.GetType().Name } else { 'null' }))"
+                (Test-Path "Env:\TEST_VAR_A") | Should -Be $false # Expect variable to be non-existent
                 [Environment]::GetEnvironmentVariable("TEST_VAR_GLOBAL") | Should -Be "initial_global_val"
             }
         }
@@ -302,7 +295,6 @@ InModuleScope 'ImportDotEnv' {
             It "loads hierarchically and restores correctly level by level" {
                 [Environment]::SetEnvironmentVariable("TEST_VAR_BASE", "initial_base")
                 [Environment]::SetEnvironmentVariable("TEST_VAR_OVERRIDE", "initial_override")
-                [Environment]::SetEnvironmentVariable("TEST_VAR_SUB", $null)
 
                 Set-Location $script:SubDir.FullName
                 [Environment]::GetEnvironmentVariable("TEST_VAR_BASE") | Should -Be "base_val"
@@ -310,24 +302,10 @@ InModuleScope 'ImportDotEnv' {
                 [Environment]::GetEnvironmentVariable("TEST_VAR_OVERRIDE") | Should -Be "sub_override_val"
 
                 Set-Location $script:BaseDir.FullName # Go to baseDir
-                [Environment]::GetEnvironmentVariable("TEST_VAR_BASE") | Should -Be "base_val"
                 $expectedVarSub = if ($Global:InitialEnvironment.ContainsKey("TEST_VAR_SUB")) { $Global:InitialEnvironment["TEST_VAR_SUB"] } else { $null }
                 $actualVarSub = [Environment]::GetEnvironmentVariable("TEST_VAR_SUB")
-                Write-Host "TEST SCRIPT: Checking TEST_VAR_SUB. Expected: '$expectedVarSub' (IsNull: $($null -eq $expectedVarSub)). Actual: '$actualVarSub' (IsNull: $($null -eq $actualVarSub), Type: $($actualVarSub.GetType().Name))"
-                # Accommodate Pester environment
-                $actualVarSub | Should -Satisfy {
-                    param($pipedValue)
-                    $conditionMet = $false
-                    if ($null -eq $expectedVarSub) {
-                        # Expected to be unset
-                        $conditionMet = ($null -eq $pipedValue -or $pipedValue -eq "")
-                    }
-                    else {
-                        # Expected to be a specific value
-                        $conditionMet = ($pipedValue -eq $expectedVarSub)
-                    }
-                    $conditionMet
-                } # Removed custom message
+                Write-Host "TEST SCRIPT: Checking TEST_VAR_SUB. Expected: '$expectedVarSub' (IsNull: $($null -eq $expectedVarSub)). Actual: '$actualVarSub' (IsNull: $($null -eq $actualVarSub), Type: $(if ($null -ne $actualVarSub) { $actualVarSub.GetType().Name } else { 'null' }))"
+                (Test-Path "Env:\TEST_VAR_SUB") | Should -Be $false # Expect variable to be non-existent
                 [Environment]::GetEnvironmentVariable("TEST_VAR_OVERRIDE") | Should -Be "base_override_val"
 
                 # Go to parent directory (which is the Pester test script's directory, effectively)
@@ -335,21 +313,8 @@ InModuleScope 'ImportDotEnv' {
                 [Environment]::GetEnvironmentVariable("TEST_VAR_BASE") | Should -Be "initial_base"
                 $expectedVarSubGlobal = if ($Global:InitialEnvironment.ContainsKey("TEST_VAR_SUB")) { $Global:InitialEnvironment["TEST_VAR_SUB"] } else { $null }
                 $actualVarSubGlobal = [Environment]::GetEnvironmentVariable("TEST_VAR_SUB")
-                Write-Host "TEST SCRIPT: Checking TEST_VAR_SUB (Global). Expected: '$expectedVarSubGlobal' (IsNull: $($null -eq $expectedVarSubGlobal)). Actual: '$actualVarSubGlobal' (IsNull: $($null -eq $actualVarSubGlobal), Type: $($actualVarSubGlobal.GetType().Name))"
-                # Accommodate Pester environment
-                $actualVarSubGlobal | Should -Satisfy {
-                    param($pipedValue)
-                    $conditionMet = $false
-                    if ($null -eq $expectedVarSubGlobal) {
-                        # Expected to be unset
-                        $conditionMet = ($null -eq $pipedValue -or $pipedValue -eq "")
-                    }
-                    else {
-                        # Expected to be a specific value
-                        $conditionMet = ($pipedValue -eq $expectedVarSubGlobal)
-                    }
-                    $conditionMet
-                } # Removed custom message
+                Write-Host "TEST SCRIPT: Checking TEST_VAR_SUB (Global). Expected: '$expectedVarSubGlobal' (IsNull: $($null -eq $expectedVarSubGlobal)). Actual: '$actualVarSubGlobal' (IsNull: $($null -eq $actualVarSubGlobal), Type: $(if ($null -ne $actualVarSubGlobal) { $actualVarSubGlobal.GetType().Name } else { 'null' }))"
+                (Test-Path "Env:\TEST_VAR_SUB") | Should -Be $false # Expect variable to be non-existent
                 [Environment]::GetEnvironmentVariable("TEST_VAR_OVERRIDE") | Should -Be "initial_override"
             }
         }
@@ -365,29 +330,14 @@ InModuleScope 'ImportDotEnv' {
             }
 
             It "creates a new variable and removes it on exit (restores to non-existent)" {
-                [Environment]::SetEnvironmentVariable("NEW_VAR", $null) # Ensure not set
-
                 Set-Location $script:DirB.FullName
                 [Environment]::GetEnvironmentVariable("NEW_VAR") | Should -Be "new_value"
                 # Go to parent directory
                 Set-Location (Split-Path $script:DirB.FullName -Parent)
                 $expectedNewVar = if ($Global:InitialEnvironment.ContainsKey("NEW_VAR")) { $Global:InitialEnvironment["NEW_VAR"] } else { $null }
                 $actualNewVar = [Environment]::GetEnvironmentVariable("NEW_VAR")
-                Write-Host "TEST SCRIPT: Checking NEW_VAR. Expected: '$expectedNewVar' (IsNull: $($null -eq $expectedNewVar)). Actual: '$actualNewVar' (IsNull: $($null -eq $actualNewVar), Type: $($actualNewVar.GetType().Name))"
-                # Accommodate Pester environment
-                $actualNewVar | Should -Satisfy {
-                    param($pipedValue)
-                    $conditionMet = $false
-                    if ($null -eq $expectedNewVar) {
-                        # Expected to be unset
-                        $conditionMet = ($null -eq $pipedValue -or $pipedValue -eq "")
-                    }
-                    else {
-                        # Expected to be a specific value
-                        $conditionMet = ($pipedValue -eq $expectedNewVar)
-                    }
-                    $conditionMet
-                } # Removed custom message
+                Write-Host "TEST SCRIPT: Checking NEW_VAR. Expected: '$expectedNewVar' (IsNull: $($null -eq $expectedNewVar)). Actual: '$actualNewVar' (IsNull: $($null -eq $actualNewVar), Type: $(if ($null -ne $actualNewVar) { $actualNewVar.GetType().Name } else { 'null' }))"
+                (Test-Path "Env:\NEW_VAR") | Should -Be $false # Expect variable to be non-existent
             }
         }
 
