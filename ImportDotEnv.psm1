@@ -368,7 +368,7 @@ function Enable-ImportDotEnvCdIntegration {
     Write-Warning "Enable-ImportDotEnvCdIntegration: CRITICAL - Module could not be determined via `$MyInvocation.MyCommand.Module."
   }
 
-  Write-Host "Enabling ImportDotEnv integration for 'Set-Location', 'cd', and 'sl' commands." -ForegroundColor Yellow
+  Write-Host "Enabling ImportDotEnv integration for 'Set-Location', 'cd', and 'sl' commands..." -ForegroundColor Yellow
   Write-Host "These commands will now also trigger .env file processing." -ForegroundColor Yellow
   Write-Host "To disable, run 'Disable-ImportDotEnvCdIntegration'." -ForegroundColor Yellow
 
@@ -443,79 +443,86 @@ function Enable-ImportDotEnvCdIntegration {
   Set-Alias -Name sl -Value $wrapperFunctionFullName -Scope Global -Force -Option ReadOnly,AllScope
   Write-Debug "Enable-ImportDotEnvCdIntegration: Successfully Set-Alias 'sl' to '$wrapperFunctionFullName'. Current 'sl' type: $((Get-Command sl -ErrorAction SilentlyContinue).CommandType)"
 
-  Write-Host "ImportDotEnv 'Set-Location', 'cd', 'sl' integration enabled." -ForegroundColor Green
+  Write-Host "ImportDotEnv 'Set-Location', 'cd', 'sl' integration enabled!" -ForegroundColor Green
 }
 
 function Disable-ImportDotEnvCdIntegration {
   [CmdletBinding()]
   param()
 
-  Write-Host "Disabling ImportDotEnv integration for 'Set-Location', 'cd', and 'sl'." -ForegroundColor Yellow
+  Write-Host "Disabling ImportDotEnv integration for 'Set-Location', 'cd', and 'sl'..." -ForegroundColor Yellow
 
   $wrapperFunctionFullName = "ImportDotEnv\Invoke-ImportDotEnvSetLocationWrapper"
   $restoredDefaultAliases = $false
 
-  foreach ($commandName in @("Set-Location", "cd", "sl")) {
-    if ($commandName -eq "Set-Location") {
-        # Attempt to remove the alias if it exists and points to our wrapper
-        $slAlias = Get-Command Set-Location -CommandType Alias -ErrorAction SilentlyContinue
-        if ($slAlias -and $slAlias.Definition -eq $wrapperFunctionFullName) {
-            Remove-Alias -Name Set-Location -Scope Global -Force -ErrorAction SilentlyContinue
-            Write-Debug " - 'Set-Location' alias (ImportDotEnv proxy) removed."
-            # Explicitly check if it's a cmdlet now. If not, something is still wrong.
-            $currentSetLocation = Get-Command Set-Location -ErrorAction SilentlyContinue
-            if ($currentSetLocation.CommandType -ne [System.Management.Automation.CommandTypes]::Cmdlet) {
-                Write-Warning " - WARNING: Set-Location is still not a cmdlet after removing alias. Type: $($currentSetLocation.CommandType). Attempting to restore default alias."
-                # As a fallback, try to re-alias it to the original cmdlet path if known, or just remove again.
-                # This part is tricky as the original cmdlet path might not be easily accessible if overridden.
-                # For now, just ensure the alias is gone. The test will verify if the cmdlet is resolved.
-            }
-            $restoredDefaultAliases = $true
-        } else {
-            Write-Host " - 'Set-Location' command was not an alias managed by ImportDotEnv or already restored."
-        }
-    } elseif ($commandName -eq 'cd') { # Handle 'cd' as a function
-        $cmdInfo = Get-Command $commandName -ErrorAction SilentlyContinue
-        if ($null -eq $cmdInfo) {
-            Write-Host " - '$($commandName)' command not found."
-            continue
-        }
-        if ($cmdInfo.CommandType -eq [System.Management.Automation.CommandTypes]::Function) {
-            if ($cmdInfo.ScriptBlock.ToString() -match ([regex]::Escape($wrapperFunctionFullName))) {
-                Remove-Item "Function:\Global:$commandName" -Force -ErrorAction SilentlyContinue
-                Write-Debug " - '$($commandName)' function (ImportDotEnv proxy) removed."
-                Set-Alias -Name $commandName -Value Set-Location -Scope Global -Option AllScope -Force
-                Write-Debug " - '$($commandName)' alias restored to default (Set-Location)."
-                $restoredDefaultAliases = $true
-            } else {
-                Write-Host " - '$($commandName)' function definition does not match expected proxy."
-            }
-        } else {
-             Write-Host " - '$($commandName)' command was not a function managed by ImportDotEnv or already restored."
-        }
-    } elseif ($commandName -eq 'sl') { # Handle 'sl' as an alias
-        $slAlias = Get-Command sl -CommandType Alias -ErrorAction SilentlyContinue
-        if ($slAlias -and $slAlias.Definition -eq $wrapperFunctionFullName) {
-            Remove-Alias -Name sl -Scope Global -Force -ErrorAction SilentlyContinue
-            Write-Debug " - 'sl' alias (ImportDotEnv proxy to '$wrapperFunctionFullName') removed."
-            Set-Alias -Name sl -Value Set-Location -Scope Global -Option AllScope -Force # Restore default alias
-            Write-Debug " - 'sl' alias restored to default (Set-Location)."
-            $restoredDefaultAliases = $true
-        } else {
-            Write-Debug " - 'sl' command was not an alias managed by ImportDotEnv or already restored."
-        }
+  # Phase 1: Remove our specific proxies if they exist
+  Write-Debug "Disable-ImportDotEnvCdIntegration: Phase 1 - Removing proxies."
+
+  # For Set-Location (was an alias to our wrapper)
+  $cmdInfo = Get-Command "Set-Location" -ErrorAction SilentlyContinue
+  if ($cmdInfo -and $cmdInfo.CommandType -eq [System.Management.Automation.CommandTypes]::Alias -and $cmdInfo.Definition -eq $wrapperFunctionFullName) {
+    Remove-Alias -Name "Set-Location" -Scope Global -Force -ErrorAction SilentlyContinue
+    Write-Debug " - 'Set-Location' (ImportDotEnv alias proxy) removed."
+    $restoredDefaultAliases = $true # Indicate that we made a change
+  }
+
+  # For cd (was a function calling our wrapper)
+  $cmdInfo = Get-Command "cd" -ErrorAction SilentlyContinue
+  if ($cmdInfo -and $cmdInfo.CommandType -eq [System.Management.Automation.CommandTypes]::Function -and $cmdInfo.ScriptBlock.ToString() -match ([regex]::Escape($wrapperFunctionFullName))) {
+    Remove-Item "Function:\Global:cd" -Force -ErrorAction SilentlyContinue
+    Write-Debug " - 'cd' (ImportDotEnv function proxy) removed."
+    $restoredDefaultAliases = $true # Indicate that we made a change
+  }
+
+  # For sl (was an alias to our wrapper)
+  $cmdInfo = Get-Command "sl" -ErrorAction SilentlyContinue
+  if ($cmdInfo -and $cmdInfo.CommandType -eq [System.Management.Automation.CommandTypes]::Alias -and $cmdInfo.Definition -eq $wrapperFunctionFullName) {
+    Remove-Alias -Name "sl" -Scope Global -Force -ErrorAction SilentlyContinue
+    Write-Debug " - 'sl' (ImportDotEnv alias proxy) removed."
+    $restoredDefaultAliases = $true # Indicate that we made a change
+  }
+
+  # Phase 2: Ensure default states are robustly restored
+  Write-Debug "Disable-ImportDotEnvCdIntegration: Phase 2 - Ensuring default command states."
+
+  # Ensure Set-Location is the original cmdlet
+  # Remove any alias or function that might be obscuring the original cmdlet
+  Write-Debug "Disable-ImportDotEnvCdIntegration: Restoring Set-Location to original cmdlet."
+  Remove-Alias -Name "Set-Location" -Scope Global -Force -ErrorAction SilentlyContinue
+  Remove-Item "Function:\Global:Set-Location" -Force -ErrorAction SilentlyContinue
+  $finalSetLocation = Get-Command "Set-Location" -ErrorAction SilentlyContinue
+  if ($null -eq $finalSetLocation) {
+    Write-Warning " - CRITICAL: 'Set-Location' command is missing after attempting to restore defaults."
+  } elseif ($finalSetLocation.Source -ne "Microsoft.PowerShell.Management" -or $finalSetLocation.CommandType -ne [System.Management.Automation.CommandTypes]::Cmdlet) {
+    Write-Warning " - 'Set-Location' may not be correctly restored. Expected Cmdlet from Microsoft.PowerShell.Management. Found Type: $($finalSetLocation.CommandType), Source: $($finalSetLocation.Source)."
+  } else {
+    Write-Debug " - 'Set-Location' confirmed as original cmdlet."
+  }
+
+  # Ensure cd and sl are aliases pointing to Set-Location
+  foreach ($aliasName in @("cd", "sl")) {
+    Write-Debug "Disable-ImportDotEnvCdIntegration: Restoring '$aliasName' as alias to Set-Location."
+    # Remove any function that might be named $aliasName
+    Remove-Item "Function:\Global:$aliasName" -Force -ErrorAction SilentlyContinue
+    # Set the alias
+    Set-Alias -Name $aliasName -Value "Set-Location" -Scope Global -Option AllScope -Force -ErrorAction SilentlyContinue
+    $finalAlias = Get-Command $aliasName -ErrorAction SilentlyContinue
+    if ($null -eq $finalAlias) {
+        Write-Warning " - CRITICAL: '$aliasName' command is missing after attempting to restore default alias."
+    } elseif ($finalAlias.CommandType -ne [System.Management.Automation.CommandTypes]::Alias -or $finalAlias.Definition -ne "Set-Location") {
+        Write-Warning " - '$aliasName' may not be correctly restored as an alias to Set-Location. Found Type: $($finalAlias.CommandType), Definition: $($finalAlias.Definition)."
     } else {
-      Write-Debug " - '$($commandName)' command was not managed by ImportDotEnv or already restored."
+        Write-Debug " - '$aliasName' confirmed as alias to Set-Location."
     }
   }
 
   if ($restoredDefaultAliases) {
-    $predicate = "disabled. Default command behavior restored."
+    $predicate = "disabled, default command behavior restored"
     # Write-Host "ImportDotEnv 'Set-Location' integration disabled. Default command behavior restored."
   } else {
-    $predicate = "was not active or already disabled."
+    $predicate = "was not active or already disabled"
   }
-  Write-Host "ImportDotEnv 'Set-Location' integration ${predicate}"
+  Write-Host "ImportDotEnv 'Set-Location' integration ${predicate}!" -ForegroundColor Magenta
 }
 
 Export-ModuleMember -Function Import-DotEnv,
