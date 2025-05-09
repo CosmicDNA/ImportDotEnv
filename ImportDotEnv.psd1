@@ -12,7 +12,7 @@
 RootModule = '.\ImportDotEnv.psm1'
 
 # Version number of this module.
-ModuleVersion = '0.0.22'
+ModuleVersion = '1.0.0'
 
 # Supported PSEditions
 # CompatiblePSEditions = @()
@@ -72,7 +72,9 @@ PowerShellVersion = '4.0'
 FunctionsToExport = @(
     'Get-EnvFilesUpstream',
     'Import-DotEnv',
-    'Set-Location'
+    'Enable-ImportDotEnvCdIntegration',
+    'Disable-ImportDotEnvCdIntegration',
+    'Invoke-ImportDotEnvSetLocationWrapper'
 )
 
 # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.
@@ -139,4 +141,3 @@ PrivateData = @{
 # DefaultCommandPrefix = ''
 
 }
-

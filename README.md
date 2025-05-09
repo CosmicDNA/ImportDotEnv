@@ -1,22 +1,27 @@
-# ImportDotEnv
+# ImportDotEnv PowerShell Module
 
 ![CI/CD](https://github.com/CosmicDNA/ImportDotEnv/actions/workflows/pester.yml/badge.svg)
 [![Coverage](https://img.shields.io/endpoint?url=https://cosmicdna.github.io/ImportDotEnv/coverage.json)](https://cosmicdna.github.io/ImportDotEnv/)
 [![PowerShell Gallery](https://img.shields.io/powershellgallery/v/ImportDotEnv?label=PowerShell%20Gallery)](https://www.powershellgallery.com/packages/ImportDotEnv)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-A PowerShell module for managing `.env` files, allowing you to load and unload environment variables dynamically. This module is designed to simplify working with environment variables in PowerShell scripts and automation workflows.
+`ImportDotEnv` is a PowerShell module designed to simplify environment variable management using `.env` files. It supports hierarchical loading of `.env` files, automatic unloading/restoration of variables when changing directories (with `cd` integration), and provides helpful console output with VS Code integration.
+
 
 ---
 
 ## Features
 
-- **VS Code hyperlink to env var definition**: Automatically sets a hyperlink on the terminal to each environment variable defintion.
-- **Load `.env` Files**: Automatically load environment variables from `.env` files in the current or parent directories.
-- **Unload `.env` Files**: Unload previously loaded environment variables when switching directories.
-- **Track Changes**: Track and manage changes to `.env` files as you navigate through directories.
-- **Colorized Output**: Provides colorized and formatted output for better visibility of loaded/unloaded variables.
-- **Cross-Platform**: Works on Windows, macOS, and Linux.
+*   **Hierarchical `.env` Loading**: Loads `.env` files from the current directory up to the root. Variables in child `.env` files override those from parent directories.
+*   **Automatic Restoration**: When you navigate away from a directory (or load a new `.env` configuration), variables set by the previous `.env` files are automatically restored to their original values or unset if they were newly created.
+*   **`cd` Integration**: Optionally integrates with `Set-Location` (and its aliases `cd`, `sl`) to automatically process `.env` files upon directory changes.
+*   **VS Code Hyperlinks**: Console output for loaded variables includes hyperlinks that can take you directly to the variable definition in your `.env` file within VS Code. Restored variables link to a VS Code search for the variable name.
+*   **Manual Invocation**: You can manually trigger `.env` processing for any directory.
+*   **`.env` File Format**:
+    *   Supports `VAR=value` assignments.
+    *   Lines starting with `#` are treated as comments.
+    *   Empty lines are ignored.
+    *   Whitespace around variable names and values is trimmed.
 
 ## Preview
 
@@ -64,7 +69,7 @@ Import-DotEnv
 
 ## Usage
 
-### Import Environment Variables
+### Manually Importing Environment Variables
 
 To load environment variables from a `.env` file in the current directory or any parent directory, use the `Import-DotEnv` function:
 
@@ -78,8 +83,24 @@ This will:
 2. Load the environment variables from the found .env files.
 3. Display a colorized output of the loaded variables.
 
-### Change Directory and Auto-Load .env Files
-The module overrides the Set-Location cmdlet to automatically load .env files when you change directories:
+### Enabling/Disabling `cd` Integration
+
+For automatic `.env` processing when you change directories, you can enable or disable the `cd` integration.
+
+**Enable Integration:**
+```powershell
+Enable-ImportDotEnvCdIntegration
+```
+This makes `Set-Location` (and its aliases `cd`, `sl`) automatically manage `.env` files. This is the recommended way to use the module for an interactive shell experience.
+
+**Disable Integration:**
+```powershell
+Disable-ImportDotEnvCdIntegration
+```
+This restores `Set-Location`, `cd`, and `sl` to their default PowerShell behavior.
+
+### Automatic `.env` Processing on Directory Change (with `cd` Integration)
+When `cd` integration is enabled (using `Enable-ImportDotEnvCdIntegration`), the module overrides the `Set-Location` cmdlet to automatically load/unload .env files when you change directories:
 
 ```powershell
 cd MyProject
