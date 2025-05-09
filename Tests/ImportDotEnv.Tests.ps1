@@ -188,7 +188,6 @@ InModuleScope 'ImportDotEnv' {
 
                 [Environment]::GetEnvironmentVariable("MANUAL_TEST_VAR") | Should -Be "initial_manual"
                 Pop-Location
-                Remove-Item $manualEnvFile -ErrorAction SilentlyContinue
             }
         }
 
@@ -234,10 +233,10 @@ InModuleScope 'ImportDotEnv' {
                 # Check sl
                 $cmd = Get-Command sl -ErrorAction SilentlyContinue
                 $cmd | Should -Not -BeNull
-                $cmd.CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Function)
-                $cmd.Definition | Should -Match ([regex]::Escape("ImportDotEnv\Invoke-ImportDotEnvSetLocationWrapper"))
+                $cmd.CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Alias) # Expect Alias
+                $cmd.Definition | Should -Be "ImportDotEnv\Invoke-ImportDotEnvSetLocationWrapper" # Exact match for alias
+                $cmd.ResolvedCommand.Name | Should -Be "Invoke-ImportDotEnvSetLocationWrapper"
                 $cmd.Name | Should -Be "sl"
-                # $cmd.ModuleName | Should -Be "__DynamicModule_"
             }
 
             It "Disable-ImportDotEnvCdIntegration should restore Set-Location, cd, sl to defaults" {
@@ -254,7 +253,7 @@ InModuleScope 'ImportDotEnv' {
             }
         }
 
-        Context "Behavior with Set-Location integration enabled" {
+        Context "Set-Location Integration - Variable Loading Scenarios" {
             BeforeEach {
                 Enable-ImportDotEnvCdIntegration
                 Mock Get-EnvFilesUpstream -MockWith $script:GetEnvFilesUpstreamMock -ModuleName ImportDotEnv
@@ -279,17 +278,6 @@ InModuleScope 'ImportDotEnv' {
                 Write-Host "TEST SCRIPT: Checking TEST_VAR_A. Expected: '$expectedVarA' (IsNull: $($null -eq $expectedVarA)). Actual: '$actualVarA' (IsNull: $($null -eq $actualVarA), Type: $(if ($null -ne $actualVarA) { $actualVarA.GetType().Name } else { 'null' }))"
                 (Test-Path "Env:\TEST_VAR_A") | Should -Be $false # Expect variable to be non-existent
                 [Environment]::GetEnvironmentVariable("TEST_VAR_GLOBAL") | Should -Be "initial_global_val"
-            }
-        }
-
-        Context "Hierarchical Load and Restore (with cd integration)" {
-            BeforeEach {
-                Enable-ImportDotEnvCdIntegration
-                Mock Get-EnvFilesUpstream -MockWith $script:GetEnvFilesUpstreamMock -ModuleName ImportDotEnv
-            }
-            AfterEach {
-                Disable-ImportDotEnvCdIntegration
-                # Mocks from BeforeEach are cleaned up when the Context scope ends.
             }
 
             It "loads hierarchically and restores correctly level by level" {
@@ -317,17 +305,7 @@ InModuleScope 'ImportDotEnv' {
                 (Test-Path "Env:\TEST_VAR_SUB") | Should -Be $false # Expect variable to be non-existent
                 [Environment]::GetEnvironmentVariable("TEST_VAR_OVERRIDE") | Should -Be "initial_override"
             }
-        }
 
-        Context "Variable Creation and Removal (with cd integration)" {
-            BeforeEach {
-                Enable-ImportDotEnvCdIntegration
-                Mock Get-EnvFilesUpstream -MockWith $script:GetEnvFilesUpstreamMock -ModuleName ImportDotEnv
-            }
-            AfterEach {
-                Disable-ImportDotEnvCdIntegration
-                # Mocks from BeforeEach are cleaned up when the Context scope ends.
-            }
 
             It "creates a new variable and removes it on exit (restores to non-existent)" {
                 Set-Location $script:DirB.FullName
@@ -339,17 +317,7 @@ InModuleScope 'ImportDotEnv' {
                 Write-Host "TEST SCRIPT: Checking NEW_VAR. Expected: '$expectedNewVar' (IsNull: $($null -eq $expectedNewVar)). Actual: '$actualNewVar' (IsNull: $($null -eq $actualNewVar), Type: $(if ($null -ne $actualNewVar) { $actualNewVar.GetType().Name } else { 'null' }))"
                 (Test-Path "Env:\NEW_VAR") | Should -Be $false # Expect variable to be non-existent
             }
-        }
 
-        Context "Empty Value Handling in .env (with cd integration)" {
-            BeforeEach {
-                Enable-ImportDotEnvCdIntegration
-                Mock Get-EnvFilesUpstream -MockWith $script:GetEnvFilesUpstreamMock -ModuleName ImportDotEnv
-            }
-            AfterEach {
-                Disable-ImportDotEnvCdIntegration
-                # Mocks from BeforeEach are cleaned up when the Context scope ends.
-            }
 
             It "sets variable to empty string from .env and restores previous value on exit" {
                 [Environment]::SetEnvironmentVariable("TEST_EMPTY_VAR", "initial_empty_test_val")
@@ -369,17 +337,7 @@ InModuleScope 'ImportDotEnv' {
                 Set-Location (Split-Path $script:DirC.FullName -Parent)
                 [Environment]::GetEnvironmentVariable("TEST_EMPTY_VAR") | Should -Be "initial_empty_test_val"
             }
-        }
 
-        Context "Moving Between Unrelated Projects (with cd integration)" {
-            BeforeEach {
-                Enable-ImportDotEnvCdIntegration
-                Mock Get-EnvFilesUpstream -MockWith $script:GetEnvFilesUpstreamMock -ModuleName ImportDotEnv
-            }
-            AfterEach {
-                Disable-ImportDotEnvCdIntegration
-                # Mocks from BeforeEach are cleaned up when the Context scope ends.
-            }
 
             It "correctly unloads project1 vars and loads project2 vars, then restores global" {
                 [Environment]::SetEnvironmentVariable("PROJECT_ID", "global_project_id")
@@ -395,17 +353,7 @@ InModuleScope 'ImportDotEnv' {
                 Set-Location (Split-Path $script:Project2Dir.FullName -Parent)
                 [Environment]::GetEnvironmentVariable("PROJECT_ID") | Should -Be "global_project_id"
             }
-        }
 
-        Context "No .env files in path (with cd integration)" {
-            BeforeEach {
-                Enable-ImportDotEnvCdIntegration
-                Mock Get-EnvFilesUpstream -MockWith $script:GetEnvFilesUpstreamMock -ModuleName ImportDotEnv
-            }
-            AfterEach {
-                Disable-ImportDotEnvCdIntegration
-                # Mocks from BeforeEach are cleaned up when the Context scope ends.
-            }
 
             It "should not alter existing environment variables when moving to a dir with no .env" {
                 [Environment]::SetEnvironmentVariable("TEST_VAR_GLOBAL", "no_env_test_initial")
@@ -417,5 +365,5 @@ InModuleScope 'ImportDotEnv' {
                 [Environment]::GetEnvironmentVariable("TEST_VAR_GLOBAL") | Should -Be $originalValue
             }
         }
-    } # End of Describe
+    } # End of Describe "Import-DotEnv Core and Integration Tests"
 } # End of InModuleScope
