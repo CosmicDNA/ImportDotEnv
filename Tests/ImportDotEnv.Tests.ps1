@@ -102,6 +102,12 @@ InModuleScope 'ImportDotEnv' {
             # Set previousWorkingDirectory to a value that won't match any realistic path,
             # ensuring Import-DotEnv will re-evaluate on its next actual invocation within a test.
             # This distinct marker string helps confirm it's being reset.
+            # Ensure PWD is a known neutral state before each test (especially before Context's BeforeEach might run Enable-ImportDotEnvCdIntegration)
+            if ($script:TestRoot -and (Test-Path $script:TestRoot)) { # Check if TestRoot is initialized and exists
+                 Microsoft.PowerShell.Management\Set-Location $script:TestRoot # Use original SL to avoid module logic here
+                 Write-Host "Describe-level BeforeEach: PWD reset to $($PWD.Path)"
+            }
+            # This distinct marker string helps confirm it's being reset.
             $script:ImportDotEnvModule.SessionState.PSVariable.Set('previousWorkingDirectory', "RESET_BY_BEFORE_EACH_TEST_HOOK")
 
             Write-Host "BeforeEach: Module state reset. OriginalEnvironmentVariables count: $($script:ImportDotEnvModule.SessionState.PSVariable.GetValue('originalEnvironmentVariables').Count)"
@@ -136,9 +142,24 @@ InModuleScope 'ImportDotEnv' {
             }
             # Ensure cd integration is disabled after all tests in this describe block
             if (Get-Command Disable-ImportDotEnvCdIntegration -ErrorAction SilentlyContinue) {
+                Write-Host "AfterAll: Calling Disable-ImportDotEnvCdIntegration." -ForegroundColor Cyan
                 Disable-ImportDotEnvCdIntegration
+                Write-Host "AfterAll: Disable-ImportDotEnvCdIntegration finished." -ForegroundColor Cyan
+                $cdCmdAfterDisable = Get-Command cd -ErrorAction SilentlyContinue
+                Write-Host "AfterAll: State of 'cd' after Disable-ImportDotEnvCdIntegration: Name: $($cdCmdAfterDisable.Name), Type: $($cdCmdAfterDisable.CommandType), Definition: $($cdCmdAfterDisable.Definition)" -ForegroundColor Cyan
+                if ($cdCmdAfterDisable.CommandType -ne [System.Management.Automation.CommandTypes]::Alias) {
+                    Write-Warning "AfterAll: 'cd' IS NOT an alias after Disable-ImportDotEnvCdIntegration. This is unexpected."
+                } else {
+                    Write-Host "AfterAll: 'cd' IS an alias as expected." -ForegroundColor Green
+                }
+            } else {
+                Write-Warning "AfterAll: Disable-ImportDotEnvCdIntegration command not found. Skipping disable."
             }
-            Remove-Module ImportDotEnv -Force
+            Write-Host "AfterAll: Calling Remove-Module ImportDotEnv -Force." -ForegroundColor Cyan
+            Remove-Module ImportDotEnv -Force -ErrorAction SilentlyContinue # Add SilentlyContinue for robustness in cleanup
+            Write-Host "AfterAll: Remove-Module ImportDotEnv -Force finished." -ForegroundColor Cyan
+            $cdCmdAfterRemoveModule = Get-Command cd -ErrorAction SilentlyContinue
+            Write-Host "AfterAll: State of 'cd' after Remove-Module: Name: $($cdCmdAfterRemoveModule.Name), Type: $($cdCmdAfterRemoveModule.CommandType), Definition: $($cdCmdAfterRemoveModule.Definition)" -ForegroundColor Cyan
         }
 
         # Helper function for mocking Get-EnvFilesUpstream
@@ -170,27 +191,31 @@ InModuleScope 'ImportDotEnv' {
                 [Environment]::SetEnvironmentVariable("MANUAL_TEST_VAR", "initial_manual")
                 $manualEnvFile = Join-Path $script:TestRoot ".env" # Changed from "manual.env"
                 Set-Content -Path $manualEnvFile -Value "MANUAL_TEST_VAR=loaded_manual"
+                try {
+                    Push-Location $script:TestRoot
+                    # Mock Get-EnvFilesUpstream for this specific call if it's not covered by a broader mock context
+                    Mock Get-EnvFilesUpstream -MockWith $script:GetEnvFilesUpstreamMock -ModuleName ImportDotEnv
+                    Import-DotEnv -Path "."
+                    # Pester automatically cleans mocks from 'It' scope at the end of 'It'
 
-                Push-Location $script:TestRoot
-                # Mock Get-EnvFilesUpstream for this specific call if it's not covered by a broader mock context
-                Mock Get-EnvFilesUpstream -MockWith $script:GetEnvFilesUpstreamMock -ModuleName ImportDotEnv
-                Import-DotEnv -Path "."
-                # Pester automatically cleans mocks from 'It' scope at the end of 'It'
+                    [Environment]::GetEnvironmentVariable("MANUAL_TEST_VAR") | Should -Be "loaded_manual"
 
-                [Environment]::GetEnvironmentVariable("MANUAL_TEST_VAR") | Should -Be "loaded_manual"
+                    # Simulate moving out by calling Import-DotEnv for the parent (or a neutral dir)
+                    # This requires Import-DotEnv to correctly identify the change in context.
+                    # The module's state ($script:previousEnvFiles, $script:previousWorkingDirectory) is key.
+                    # To properly test restoration, we need to ensure the module's state is as if we "left" $script:TestRoot
+                    # A direct call to Import-DotEnv with a different path should trigger this.
+                    $parentOfTestRoot = Split-Path $script:TestRoot -Parent
+                    Mock Get-EnvFilesUpstream -MockWith $script:GetEnvFilesUpstreamMock -ModuleName ImportDotEnv # Ensure mock is active for this call too
+                    Import-DotEnv -Path $parentOfTestRoot
+                    # Pester automatically cleans mocks from 'It' scope at the end of 'It'
 
-                # Simulate moving out by calling Import-DotEnv for the parent (or a neutral dir)
-                # This requires Import-DotEnv to correctly identify the change in context.
-                # The module's state ($script:previousEnvFiles, $script:previousWorkingDirectory) is key.
-                # To properly test restoration, we need to ensure the module's state is as if we "left" $script:TestRoot
-                # A direct call to Import-DotEnv with a different path should trigger this.
-                $parentOfTestRoot = Split-Path $script:TestRoot -Parent
-                Mock Get-EnvFilesUpstream -MockWith $script:GetEnvFilesUpstreamMock -ModuleName ImportDotEnv # Ensure mock is active for this call too
-                Import-DotEnv -Path $parentOfTestRoot
-                # Pester automatically cleans mocks from 'It' scope at the end of 'It'
-
-                [Environment]::GetEnvironmentVariable("MANUAL_TEST_VAR") | Should -Be "initial_manual"
-                Pop-Location
+                    [Environment]::GetEnvironmentVariable("MANUAL_TEST_VAR") | Should -Be "initial_manual"
+                    Pop-Location
+                }
+                finally {
+                    if (Test-Path $manualEnvFile) { Remove-Item $manualEnvFile -Force -ErrorAction SilentlyContinue }
+                }
             }
         }
 
@@ -198,8 +223,7 @@ InModuleScope 'ImportDotEnv' {
             AfterEach {
                 # Ensure integration is disabled after each test in this context
                 Disable-ImportDotEnvCdIntegration -ErrorAction SilentlyContinue
-                # No mocks are set up in the BeforeEach or It blocks of this specific Context,
-                # so no Remove-Mock is needed here.
+                # Mocks defined within 'It' blocks are automatically cleaned up by Pester.
             }
 
             It "Set-Location should be the original cmdlet by default after module import" {
@@ -209,7 +233,7 @@ InModuleScope 'ImportDotEnv' {
                 (Get-Command Set-Location).ModuleName | Should -Be "Microsoft.PowerShell.Management"
             }
 
-            It "Enable-ImportDotEnvCdIntegration should alias Set-Location, cd, sl" {
+            It "Enable-ImportDotEnvCdIntegration should alias Set-Location, cd, sl" -Tag "RunThisOnly" {
                 Enable-ImportDotEnvCdIntegration # This function is called from within InModuleScope 'ImportDotEnv'
 
                 # Check Set-Location
@@ -223,15 +247,10 @@ InModuleScope 'ImportDotEnv' {
                 # Check cd
                 # Get all commands named 'cd' and find the function one, if it exists.
                 # This is to handle cases where the default alias might still be present but our function also exists.
-                $cdCommands = Get-Command cd -All -ErrorAction SilentlyContinue
-                $cdCommands | Should -Not -BeNullOrEmpty
-                $cdFunction = $cdCommands | Where-Object { $_.CommandType -eq [System.Management.Automation.CommandTypes]::Function }
-                $cdFunction | Should -Not -BeNull "Expected to find a 'cd' command that is a Function."
-                $cdFunction.Definition | Should -Match ([regex]::Escape("ImportDotEnv\Invoke-ImportDotEnvSetLocationWrapper"))
-                $cdFunction.Name | Should -Be "cd"
-                # If multiple 'cd' commands exist (e.g., Alias and Function), ensure the Function is what would be resolved by default
-                # This is harder to test directly without invoking. The Disable-ImportDotEnvCdIntegration log is good evidence.
-                # $cmd.ModuleName | Should -Be "__DynamicModule_" # Or "ImportDotEnv" if it was the wrapper itself
+                $cmd = Get-Command cd -ErrorAction SilentlyContinue # cd should now be our function
+                $cmd | Should -Not -BeNull
+                $cmd.CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Function)
+                $cmd.ScriptBlock.ToString() | Should -Match ([regex]::Escape("ImportDotEnv\Invoke-ImportDotEnvSetLocationWrapper"))
 
                 # Check sl
                 $cmd = Get-Command sl -ErrorAction SilentlyContinue
@@ -254,6 +273,83 @@ InModuleScope 'ImportDotEnv' {
                 (Get-Command sl).CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Alias)
                 (Get-Command sl).Definition | Should -Be "Set-Location" # Default alias target
             }
+
+            It "loads .env variables for the current directory upon enabling integration and restores on subsequent cd" -Tag "NewTest" {
+                # Mock Get-EnvFilesUpstream for this specific test
+                Mock Get-EnvFilesUpstream -MockWith $script:GetEnvFilesUpstreamMock -ModuleName ImportDotEnv
+
+                # Ensure integration is disabled initially for this test
+                Disable-ImportDotEnvCdIntegration -ErrorAction SilentlyContinue
+                (Get-Command Set-Location).CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Cmdlet)
+
+                # Store initial values of relevant vars (or ensure they are not set)
+                $initialTestVarA = "initial_A_for_enable_test"
+                $initialTestVarGlobal = "initial_GLOBAL_for_enable_test"
+                [Environment]::SetEnvironmentVariable("TEST_VAR_A", $initialTestVarA)
+                [Environment]::SetEnvironmentVariable("TEST_VAR_GLOBAL", $initialTestVarGlobal)
+
+                # Go to a directory with a .env file ($script:DirA.FullName contains TEST_VAR_A=valA, TEST_VAR_GLOBAL=valA_override)
+                # Use the original Set-Location for this setup step to avoid triggering any premature logic.
+                Microsoft.PowerShell.Management\Set-Location $script:DirA.FullName
+
+                # At this point, vars should still be their initial values as integration is off
+                [Environment]::GetEnvironmentVariable("TEST_VAR_A") | Should -Be $initialTestVarA
+                [Environment]::GetEnvironmentVariable("TEST_VAR_GLOBAL") | Should -Be $initialTestVarGlobal
+
+                # Enable integration (this should now trigger a load for $script:DirA)
+                Enable-ImportDotEnvCdIntegration
+
+                # Verify variables from DirA/.env are loaded
+                [Environment]::GetEnvironmentVariable("TEST_VAR_A") | Should -Be "valA"
+                [Environment]::GetEnvironmentVariable("TEST_VAR_GLOBAL") | Should -Be "valA_override"
+
+                # Now, move out of DirA using the integrated Set-Location. This should trigger unload.
+                Set-Location (Split-Path $script:DirA.FullName -Parent)
+
+                # Verify restoration of original values
+                [Environment]::GetEnvironmentVariable("TEST_VAR_A") | Should -Be $initialTestVarA
+                [Environment]::GetEnvironmentVariable("TEST_VAR_GLOBAL") | Should -Be $initialTestVarGlobal
+
+                # The AfterEach for this context will call Disable-ImportDotEnvCdIntegration.
+                # The mock for Get-EnvFilesUpstream will be automatically removed by Pester as it's It-scoped.
+            }
+
+            It "unloads .env variables for the current directory upon disabling integration" -Tag "NewTestDisable" {
+                # Mock Get-EnvFilesUpstream for this specific test
+                Mock Get-EnvFilesUpstream -MockWith $script:GetEnvFilesUpstreamMock -ModuleName ImportDotEnv
+
+                # Ensure integration is disabled initially for this test
+                Disable-ImportDotEnvCdIntegration -ErrorAction SilentlyContinue
+                (Get-Command Set-Location).CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Cmdlet)
+
+                # Store initial values of relevant vars
+                $initialTestVarA = "initial_A_for_disable_test"
+                $initialTestVarGlobal = "initial_GLOBAL_for_disable_test"
+                [Environment]::SetEnvironmentVariable("TEST_VAR_A", $initialTestVarA)
+                [Environment]::SetEnvironmentVariable("TEST_VAR_GLOBAL", $initialTestVarGlobal)
+
+                # Go to a directory with a .env file ($script:DirA.FullName contains TEST_VAR_A=valA, TEST_VAR_GLOBAL=valA_override)
+                # Use the original Set-Location for this setup step.
+                Microsoft.PowerShell.Management\Set-Location $script:DirA.FullName
+
+                # Enable integration (this should load .env for DirA)
+                Enable-ImportDotEnvCdIntegration
+
+                # Verify variables from DirA/.env are loaded
+                [Environment]::GetEnvironmentVariable("TEST_VAR_A") | Should -Be "valA"
+                [Environment]::GetEnvironmentVariable("TEST_VAR_GLOBAL") | Should -Be "valA_override"
+
+                # Now, disable integration while still in DirA. This should trigger unload.
+                Disable-ImportDotEnvCdIntegration
+
+                # Verify restoration of original values
+                [Environment]::GetEnvironmentVariable("TEST_VAR_A") | Should -Be $initialTestVarA
+                [Environment]::GetEnvironmentVariable("TEST_VAR_GLOBAL") | Should -Be $initialTestVarGlobal
+
+                # Verify commands are restored (this is also covered by other tests, but good for completeness here)
+                (Get-Command Set-Location).CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Cmdlet)
+                (Get-Command cd).Definition | Should -Be "Set-Location"
+            }
         }
 
         Context "Set-Location Integration - Variable Loading Scenarios" {
@@ -266,7 +362,7 @@ InModuleScope 'ImportDotEnv' {
                 # Mocks from BeforeEach are cleaned up when the Context scope ends.
             }
 
-            It "loads variables from .env and restores global on exit" {
+            It "loads variables from .env and restores global on exit" -Tag "First" {
                 [Environment]::SetEnvironmentVariable("TEST_VAR_GLOBAL", "initial_global_val")
                 Set-Location $script:DirA.FullName
 
