@@ -131,13 +131,13 @@ You can easily see which environment variables are currently managed by `ImportD
 Import-DotEnv -List
 ```
 
-**Output:**
+**Example Output:**
 
-| Name             | Defined In         |
-|------------------|--------------------|
-| GALLERY_2        | env                |
-| GALLERY_API_KEY  | .env               |
-| VK_ADD_LAYER_PATH| ..\baseDir\.env    |
+| Environment Variable | Defined In  |
+|----------------------|-------------|
+| GALLERY_USER         | .env        |
+| GALLERY_API_KEY      | .env        |
+| ZK_LAYER_PATH        | ..\\.env    |
 
 
 - **Name**: The environment variable name. In supported terminals (like VS Code or Windows Terminal), this will be a clickable hyperlink that opens a search for the variable in your workspace.

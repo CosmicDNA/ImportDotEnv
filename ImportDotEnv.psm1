@@ -9,9 +9,10 @@ $script:trueOriginalEnvironmentVariables = @{} # Stores { VarName = OriginalValu
 $script:previousEnvFiles = @()
 $script:previousWorkingDirectory = $PWD.Path
 $script:e = [char]27
+$script:itemiserA = [char]0x2022
 $script:itemiser = [char]0x21B3
 
-$DebugPreference = 'Continue'
+# $DebugPreference = 'Continue'
 
 function Get-RelativePath {
   [CmdletBinding()]
@@ -125,59 +126,45 @@ function Format-EnvFilePath {
   return $relativePath
 }
 
-function Format-EnvFile {
-  [CmdletBinding()]
-  param(
-    [Parameter(Mandatory)]
-    [string]$EnvFile,
-    [Parameter(Mandatory)]
-    [string]$BasePath
-  )
+# function Format-EnvFile {
+#   [CmdletBinding()]
+#   param(
+#     [Parameter(Mandatory)]
+#     [string]$EnvFile,
+#     [Parameter(Mandatory)]
+#     [string]$BasePath
+#   )
 
-  # This function now only handles loading. Unloading/restoration is done in Import-DotEnv.
-  if (-not (Test-Path -LiteralPath $EnvFile -PathType Leaf)) {
-    return
-  }
+#   # This function now only handles loading. Unloading/restoration is done in Import-DotEnv.
+#   if (-not (Test-Path -LiteralPath $EnvFile -PathType Leaf)) {
+#     return
+#   }
 
-  $formattedPath = Format-EnvFilePath -Path $EnvFile -BasePath $BasePath
-  Write-Host "Processing .env file ${formattedPath}:" -ForegroundColor Cyan
+#   $formattedPath = Format-EnvFilePath -Path $EnvFile -BasePath $BasePath
+#   Write-Host "$script:itemiserA Processing .env file ${formattedPath}:" -ForegroundColor Cyan
 
-  $lineNumber = 0
-  switch -Regex -File $EnvFile {
-    '^\s*#.*' { $lineNumber++; continue } # Skip comments, count line
-    '^\s*$' { $lineNumber++; continue }   # Skip empty lines, count line
+#   $lineNumber = 0
+#   switch -Regex -File $EnvFile {
+#     '^\s*#.*' { $lineNumber++; continue } # Skip comments, count line
+#     '^\s*$' { $lineNumber++; continue }   # Skip empty lines, count line
 
-    '^([^=]+)=(.*)$' {
-      $lineNumber++
-      $varName = $Matches[1].Trim()
-      $varValue = $Matches[2].Trim()
+#     '^([^=]+)=(.*)$' {
+#       $lineNumber++
+#       $varName = $Matches[1].Trim()
+#       $varValue = $Matches[2].Trim()
 
-      # Store original value IF NOT ALREADY STORED FOR THIS LOAD CYCLE
-      if (-not $script:trueOriginalEnvironmentVariables.ContainsKey($varName)) {
-        # If the variable doesn't exist according to Test-Path, its original state is $null.
-        # Otherwise, capture its current value (which could be an empty string).
-        if (-not (Test-Path "Env:\$varName")) {
-          $script:trueOriginalEnvironmentVariables[$varName] = $null
-          Write-Debug "MODULE Format-EnvFile: Storing original value for '$varName' as `$null (Test-Path was false)."
-        }
-        else {
-          $script:trueOriginalEnvironmentVariables[$varName] = [Environment]::GetEnvironmentVariable($varName)
-          Write-Debug "MODULE Format-EnvFile: Storing original value for '$varName': '$($script:trueOriginalEnvironmentVariables[$varName])' (Test-Path was true)."
-        }
-      }
-      [Environment]::SetEnvironmentVariable($varName, $varValue)
-      Write-Debug "MODULE Format-EnvFile: Set '$varName' to '$varValue'. Current value in env: '$([Environment]::GetEnvironmentVariable($varName))'"
+#       [Environment]::SetEnvironmentVariable($varName, $varValue)
+#       Write-Debug "MODULE Format-EnvFile: Set '$varName' to '$varValue'. Current value in env: '$([Environment]::GetEnvironmentVariable($varName))'"
 
-      $fileUrl = "vscode://file/${EnvFile}:${lineNumber}"
-      $hyperlink = "$script:e]8;;$fileUrl$script:e\$varName$script:e]8;;$script:e\"
+#       $fileUrl = "vscode://file/${EnvFile}:${lineNumber}"
+#       $hyperlink = "$script:e]8;;$fileUrl$script:e\$varName$script:e]8;;$script:e\"
 
-      Write-Host "  $script:itemiser Setting environment variable: " -NoNewline
-      Write-Host $hyperlink -ForegroundColor Green -NoNewline
-      Write-Host " (from line ${lineNumber})"
-    }
-    default { $lineNumber++ } # Count other lines not matching the pattern
-  }
-}
+#       Write-Host "  $script:itemiser Setting environment variable: " -NoNewline
+#       Write-Host $hyperlink -ForegroundColor Green -NoNewline
+#       Write-Host " (from line ${lineNumber})"
+#     }
+#     default { $lineNumber++ } # Count other lines not matching the pattern
+# }
 
 # --- Helper function to get effective environment variables from a list of .env files ---
 function Get-EnvVarsFromFiles {
@@ -347,10 +334,10 @@ function Import-DotEnv {
   }
 
   $currentEnvFiles = Get-EnvFilesUpstream -Directory $resolvedPath
-  if ($null -eq $currentEnvFiles) {
-    Write-Debug "MODULE Import-DotEnv: Get-EnvFilesUpstream returned null for '$resolvedPath'. Defaulting to empty array."
-    $currentEnvFiles = @()
-  }
+  # if ($null -eq $currentEnvFiles) { # Assuming Get-EnvFilesUpstream ALWAYS returns an array (even if empty)
+  #   Write-Debug "MODULE Import-DotEnv: Get-EnvFilesUpstream call resulted in null for '$resolvedPath'. This is unexpected. Defaulting to empty array."
+  #   $currentEnvFiles = @()
+  # }
   Write-Debug "MODULE Import-DotEnv: Resolved path '$resolvedPath'. Found $($currentEnvFiles.Count) .env files upstream: $($currentEnvFiles -join ', ')"
   Write-Debug "MODULE Import-DotEnv: Previous files count: $($script:previousEnvFiles.Count) ('$($script:previousEnvFiles -join ', ')'). Previous PWD: '$($script:previousWorkingDirectory)'"
 
@@ -359,6 +346,7 @@ function Import-DotEnv {
   $currVars = Get-EnvVarsFromFiles -Files $currentEnvFiles -BasePath $resolvedPath
 
   # --- Unload Phase: Only unset variables that are in prevVars but not in currVars, or changed value ---
+  Write-Debug "MODULE Import-DotEnv (Unload Phase): Current trueOriginalEnvironmentVariables keys: $($script:trueOriginalEnvironmentVariables.Keys -join ', ')"
   $varsToUnset = @()
   foreach ($var in $prevVars.Keys) {
     if (-not $currVars.ContainsKey($var) -or $currVars[$var] -ne $prevVars[$var]) {
@@ -394,9 +382,10 @@ function Import-DotEnv {
         $varsForFile = $varToFileMap[$file]
         if ($varsForFile.Count -eq 0) { continue } # Only print header if there are actions
         $formattedPath = Format-EnvFilePath -Path $file -BasePath $script:previousWorkingDirectory
-        Write-Host "Restoring from .env file ${formattedPath}:" -ForegroundColor Yellow
+        Write-Host "$script:itemiserA Restoring env vars listed on ${formattedPath} file:" -ForegroundColor Yellow
         foreach ($varName in $varsForFile) {
           $originalValue = $script:trueOriginalEnvironmentVariables[$varName]
+          Write-Debug "MODULE Import-DotEnv (Unload Phase): For var '$varName' from file '$formattedPath', original value from trueOriginals is '$originalValue'."
           if ($null -eq $originalValue) {
             [Environment]::SetEnvironmentVariable($varName, $null, 'Process')
             Remove-Item "Env:\$varName" -Force -ErrorAction SilentlyContinue
@@ -421,6 +410,7 @@ function Import-DotEnv {
       Write-Host "Restoring variables not associated with any .env file:" -ForegroundColor Yellow
       foreach ($varName in $varsNoFile) {
         $originalValue = $script:trueOriginalEnvironmentVariables[$varName]
+        Write-Debug "MODULE Import-DotEnv (Unload Phase): For var '$varName' (no file association), original value from trueOriginals is '$originalValue'."
         if ($null -eq $originalValue) {
           [Environment]::SetEnvironmentVariable($varName, $null, 'Process')
           Remove-Item "Env:\$varName" -Force -ErrorAction SilentlyContinue
@@ -474,6 +464,7 @@ function Import-DotEnv {
   # DO NOT CLEAR $script:trueOriginalEnvironmentVariables. This is the critical change for differential behavior.
   # $script:trueOriginalEnvironmentVariables.Clear() # This line is removed.
 
+  Write-Debug "MODULE Import-DotEnv (Load Phase - Start): Current trueOriginalEnvironmentVariables keys before capture: $($script:trueOriginalEnvironmentVariables.Keys -join ', ')"
   # --- Load Phase: Ensure all variables in currVars are set to their correct value (even if previously shadowed) ---
   if ($currentEnvFiles.Count -gt 0) {
     # First, collect all variables that will be set by any .env file in this load cycle (regardless of diff)
@@ -500,12 +491,15 @@ function Import-DotEnv {
       if (-not $script:trueOriginalEnvironmentVariables.ContainsKey($varName)) {
         $currentEnvValue = [Environment]::GetEnvironmentVariable($varName, 'Process')
         if ($null -eq $currentEnvValue -and -not (Test-Path "Env:\$varName")) {
+          Write-Debug "MODULE Import-DotEnv (Load Phase - Capture): Storing original for '$varName' as `$null."
           $script:trueOriginalEnvironmentVariables[$varName] = $null
         } else {
+          Write-Debug "MODULE Import-DotEnv (Load Phase - Capture): Storing original for '$varName' as '$currentEnvValue'."
           $script:trueOriginalEnvironmentVariables[$varName] = $currentEnvValue
         }
       }
     }
+    Write-Debug "MODULE Import-DotEnv (Load Phase - End Capture): Current trueOriginalEnvironmentVariables keys after capture: $($script:trueOriginalEnvironmentVariables.Keys -join ', ')"
     # Now, for every variable in currVars, ensure it is set to the correct value (even if previously shadowed)
     foreach ($varName in $currVars.Keys) {
       $desiredValue = $currVars[$varName]
@@ -539,7 +533,7 @@ function Import-DotEnv {
         }
       }
       if ($varsToSet.Count -gt 0) {
-        $formattedPath = Format-EnvFilePath -Path $file -BasePath $resolvedPath
+        $formattedPath = Format-EnvFilePath -Path $file -BasePath $script:previousWorkingDirectory
         Write-Host "Processing .env file ${formattedPath}:" -ForegroundColor Cyan
         foreach ($varName in $varsToSet) {
           $lineNumber = $varLineMap[$varName]
