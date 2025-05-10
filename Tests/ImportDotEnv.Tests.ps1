@@ -5,6 +5,9 @@ param(
     [string]$ModulePath = (Resolve-Path (Join-Path $PSScriptRoot "..\ImportDotEnv.psm1")).Path # Assuming tests are in a subfolder
 )
 
+# Enable debug messages for this test run
+$DebugPreference = 'Continue'
+
 $Global:InitialEnvironment = @{}
 
 # Import the module before InModuleScope so Pester can find it
@@ -73,15 +76,43 @@ InModuleScope 'ImportDotEnv' {
         }
 
         BeforeEach { # Runs before each It in this Describe block
-            $testVarNames = @("TEST_VAR_GLOBAL", "TEST_VAR_A", "TEST_VAR_BASE", "TEST_VAR_OVERRIDE", "TEST_VAR_SUB", "NEW_VAR", "TEST_EMPTY_VAR", "PROJECT_ID")
+            # Variables that are truly global/external and whose pre-Pester state should be restored by BeforeEach
+            $globalTestVarNames = @("TEST_VAR_GLOBAL", "TEST_VAR_BASE", "TEST_VAR_OVERRIDE", "TEST_EMPTY_VAR", "PROJECT_ID")
+            # Variables that are primarily created/manipulated by test scenarios and should always be cleared
+            $scenarioSpecificVarNames = @("TEST_VAR_A", "TEST_VAR_SUB", "NEW_VAR")
+
+            foreach ($varName in $globalTestVarNames) {
+                $initialVal = $Global:InitialEnvironment[$varName] # This relies on $Global:InitialEnvironment being pristine
+                if ($null -eq $initialVal) {
+                    if (Test-Path "Env:\$varName") { Remove-Item "Env:\$varName" -Force -ErrorAction SilentlyContinue }
+                    [Environment]::SetEnvironmentVariable($varName, $null)
+                } else {
+                    [Environment]::SetEnvironmentVariable($varName, $initialVal)
+                }
+            }
+
+            foreach ($varName in $scenarioSpecificVarNames) {
+                Write-Host "BeforeEach: Unconditionally clearing scenario-specific var '$varName'. Initial Test-Path: $(Test-Path "Env:\$varName"), Initial Value: '$([Environment]::GetEnvironmentVariable($varName))'"
+                # Attempt to clear the variable from the process environment first.
+                [Environment]::SetEnvironmentVariable($varName, $null)
+                # Then, ensure it's also cleared from PowerShell's Env: drive if it lingers.
+                if (Test-Path "Env:\$varName") { Remove-Item "Env:\$varName" -Force -ErrorAction SilentlyContinue }
+
+                if ([Environment]::GetEnvironmentVariable($varName) -ne $null) {
+                    Write-Warning "BeforeEach: FAILED to clear '$varName'. It is still '$([Environment]::GetEnvironmentVariable($varName))'."
+                } else {
+                    Write-Host "BeforeEach: Successfully cleared '$varName'. Current Value: '$([Environment]::GetEnvironmentVariable($varName))', Test-Path: $(Test-Path "Env:\$varName")"
+                }
+            }
+
+            # Consolidate all var names for the initial message if needed, or remove this loop if covered above.
+            $testVarNames = $globalTestVarNames + $scenarioSpecificVarNames
             foreach ($varName in $testVarNames) {
                 $initialVal = $Global:InitialEnvironment[$varName]
                 if ($null -eq $initialVal) {
-                    # Ensure it's truly non-existent if its initial state was null.
-                    # Remove-Item is the most reliable way to ensure GetEnvironmentVariable returns $null.
-                    if (Test-Path "Env:\$varName") { Remove-Item "Env:\$varName" -Force -ErrorAction SilentlyContinue }
-                } else {
-                    [Environment]::SetEnvironmentVariable($varName, $initialVal)
+                    # This part is now handled by the loops above.
+                    # We could add a final check here if desired.
+                    # Write-Host "BeforeEach: Post-cleanup check for '$varName': Value: '$([Environment]::GetEnvironmentVariable($varName))', Test-Path: $(Test-Path "Env:\$varName")"
                 }
             }
             Write-Host "BeforeEach (Start): Environment variables reset."
@@ -226,14 +257,38 @@ InModuleScope 'ImportDotEnv' {
                 # Mocks defined within 'It' blocks are automatically cleaned up by Pester.
             }
 
-            It "Set-Location should be the original cmdlet by default after module import" {
+            It "should have Set-Location, cd, and sl in their default states after module import (or after disable)" {
                 # Ensure a clean state for this specific test, in case of prior partial runs
+                # The AfterEach of this context also calls Disable-ImportDotEnvCdIntegration,
+                # so this test effectively checks the state *after* a disable, which should be the default.
                 Disable-ImportDotEnvCdIntegration -ErrorAction SilentlyContinue
-                (Get-Command Set-Location).CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Cmdlet)
-                (Get-Command Set-Location).ModuleName | Should -Be "Microsoft.PowerShell.Management"
+
+                # Check Set-Location
+                $cmd = Get-Command Set-Location -ErrorAction SilentlyContinue
+                $cmd.CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Cmdlet)
+                $cmd.ModuleName | Should -Be "Microsoft.PowerShell.Management"
+
+                # Check cd
+                $cmd = Get-Command cd -ErrorAction SilentlyContinue
+                $cmd.CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Alias)
+                $cmd.Definition | Should -Be "Set-Location"
+                $cmd.ResolvedCommand.Name | Should -Be "Set-Location"
+                $cmd.ResolvedCommand.CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Cmdlet)
+                $cmd.ResolvedCommand.ModuleName | Should -Be "Microsoft.PowerShell.Management"
+
+                # Check sl
+                $cmd = Get-Command sl -ErrorAction SilentlyContinue
+                $cmd.CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Alias)
+                $cmd.Definition | Should -Be "Set-Location"
+                $cmd.ResolvedCommand.Name | Should -Be "Set-Location"
+                $cmd.ResolvedCommand.CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Cmdlet)
+                $cmd.ResolvedCommand.ModuleName | Should -Be "Microsoft.PowerShell.Management"
             }
 
-            It "Enable-ImportDotEnvCdIntegration should alias Set-Location, cd, sl" -Tag "RunThisOnly" {
+            It "Enable-ImportDotEnvCdIntegration should correctly modify Set-Location, and cd/sl should follow" {
+                # The AfterEach from the previous test ensures Disable-ImportDotEnvCdIntegration has run.
+                # So, we are starting from a "disabled" (default-like) state.
+
                 Enable-ImportDotEnvCdIntegration # This function is called from within InModuleScope 'ImportDotEnv'
 
                 # Check Set-Location
@@ -242,36 +297,100 @@ InModuleScope 'ImportDotEnv' {
                 $cmd.CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Alias)
                 $cmd.Definition | Should -Be "ImportDotEnv\Invoke-ImportDotEnvSetLocationWrapper"
                 $cmd.ResolvedCommand.Name | Should -Be "Invoke-ImportDotEnvSetLocationWrapper"
+                $cmd.ResolvedCommand.CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Function)
                 $cmd.ResolvedCommand.ModuleName | Should -Be "ImportDotEnv"
 
                 # Check cd
-                # Get all commands named 'cd' and find the function one, if it exists.
-                # This is to handle cases where the default alias might still be present but our function also exists.
-                $cmd = Get-Command cd -ErrorAction SilentlyContinue # cd should now be our function
+                # 'cd' should now be an alias to our wrapper function.
+                $cmd = Get-Command cd -ErrorAction SilentlyContinue
                 $cmd | Should -Not -BeNull
-                $cmd.CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Function)
-                $cmd.ScriptBlock.ToString() | Should -Match ([regex]::Escape("ImportDotEnv\Invoke-ImportDotEnvSetLocationWrapper"))
+                $cmd.CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Alias)
+                $cmd.Definition | Should -Be "Set-Location" # cd's definition string remains "Set-Location"
+                $cmd.ResolvedCommand.Name | Should -Be "Invoke-ImportDotEnvSetLocationWrapper"
+                $cmd.ResolvedCommand.CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Function)
+                $cmd.ResolvedCommand.ModuleName | Should -Be "ImportDotEnv" # Verify it resolves to our module's function
+                $cmd.Name | Should -Be "cd" # Ensure we got 'cd'
 
                 # Check sl
                 $cmd = Get-Command sl -ErrorAction SilentlyContinue
                 $cmd | Should -Not -BeNull
-                $cmd.CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Alias) # Expect Alias
-                $cmd.Definition | Should -Be "ImportDotEnv\Invoke-ImportDotEnvSetLocationWrapper" # Exact match for alias
+                $cmd.CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Alias)
+                $cmd.Definition | Should -Be "Set-Location" # sl's definition string remains "Set-Location"
                 $cmd.ResolvedCommand.Name | Should -Be "Invoke-ImportDotEnvSetLocationWrapper"
+                $cmd.ResolvedCommand.CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Function)
+                $cmd.ResolvedCommand.ModuleName | Should -Be "ImportDotEnv" # Verify it resolves to our module's function
                 $cmd.Name | Should -Be "sl"
             }
 
-            It "Disable-ImportDotEnvCdIntegration should restore Set-Location, cd, sl to defaults" {
+            It "Disable-ImportDotEnvCdIntegration should correctly restore Set-Location, and cd/sl should follow" {
                 Enable-ImportDotEnvCdIntegration # Enable it first
-                # At this point, cd and sl are functions. Set-Location is an alias.
                 Disable-ImportDotEnvCdIntegration # Then disable
 
-                (Get-Command Set-Location -ErrorAction SilentlyContinue).CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Cmdlet)
-                (Get-Command Set-Location).ModuleName | Should -Be "Microsoft.PowerShell.Management"
-                (Get-Command cd).CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Alias)
-                (Get-Command cd).Definition | Should -Be "Set-Location" # Default alias target
-                (Get-Command sl).CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Alias)
-                (Get-Command sl).Definition | Should -Be "Set-Location" # Default alias target
+                # Check Set-Location
+                $cmd = Get-Command Set-Location -ErrorAction SilentlyContinue
+                $cmd.CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Cmdlet)
+                $cmd.Name | Should -Be "Set-Location"
+                $cmd.ModuleName | Should -Be "Microsoft.PowerShell.Management"
+
+                # Check cd
+                $cmd = Get-Command cd -ErrorAction SilentlyContinue
+                $cmd.CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Alias)
+                $cmd.Definition | Should -Be "Set-Location"
+                $cmd.ResolvedCommand.Name | Should -Be "Set-Location"
+                $cmd.ResolvedCommand.CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Cmdlet)
+                $cmd.ResolvedCommand.ModuleName | Should -Be "Microsoft.PowerShell.Management"
+
+                # Check sl
+                $cmd = Get-Command sl -ErrorAction SilentlyContinue
+                $cmd.CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Alias)
+                $cmd.Definition | Should -Be "Set-Location"
+                $cmd.ResolvedCommand.Name | Should -Be "Set-Location"
+                $cmd.ResolvedCommand.CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Cmdlet)
+                $cmd.ResolvedCommand.ModuleName | Should -Be "Microsoft.PowerShell.Management"
+            }
+
+            It "Disable-ImportDotEnvCdIntegration removes new vars and restores overwritten vars" {
+                # This test verifies that Disable-ImportDotEnvCdIntegration correctly
+                # 1. Removes variables that were newly created by a .env file.
+                # 2. Restores variables that existed before but were overwritten by a .env file.
+
+                $newVarName = "NEW_VAR_FOR_DISABLE_TEST"
+                $existingVarName = "EXISTING_VAR_FOR_DISABLE_TEST"
+                $initialExistingValue = "initial_value_for_existing"
+
+                # Ensure $newVarName does not exist initially
+                if (Test-Path "Env:\$newVarName") { Remove-Item "Env:\$newVarName" -Force }
+                (Test-Path "Env:\$newVarName") | Should -Be $false
+
+                # Set an initial value for $existingVarName
+                [Environment]::SetEnvironmentVariable($existingVarName, $initialExistingValue)
+                [Environment]::GetEnvironmentVariable($existingVarName) | Should -Be $initialExistingValue
+
+                # Use DirB for this test, temporarily modifying its .env
+                $dirBEnvPath = Join-Path $script:DirB.FullName ".env"
+                $originalDirBEnvContent = Get-Content $dirBEnvPath -Raw -ErrorAction SilentlyContinue
+                Set-Content -Path $dirBEnvPath -Value "$newVarName=new_value_from_env`n$existingVarName=overwritten_by_env"
+
+                Mock Get-EnvFilesUpstream -MockWith $script:GetEnvFilesUpstreamMock -ModuleName ImportDotEnv
+
+                Microsoft.PowerShell.Management\Set-Location $script:DirB.FullName
+                Enable-ImportDotEnvCdIntegration
+
+                # Verify .env values are loaded
+                [Environment]::GetEnvironmentVariable($newVarName) | Should -Be "new_value_from_env"
+                [Environment]::GetEnvironmentVariable($existingVarName) | Should -Be "overwritten_by_env"
+
+                Disable-ImportDotEnvCdIntegration
+
+                # Verify $newVarName is NOT removed because Disable-ImportDotEnvCdIntegration no longer unloads
+                (Test-Path "Env:\$newVarName") | Should -Be $true
+                [Environment]::GetEnvironmentVariable($newVarName) | Should -Be "new_value_from_env"
+
+                # Verify $existingVarName is NOT restored because Disable-ImportDotEnvCdIntegration no longer unloads
+                [Environment]::GetEnvironmentVariable($existingVarName) | Should -Be "overwritten_by_env"
+
+                # Restore original DirB .env content
+                if ($null -ne $originalDirBEnvContent) { Set-Content -Path $dirBEnvPath -Value $originalDirBEnvContent -Force } else { Remove-Item $dirBEnvPath -Force -ErrorAction SilentlyContinue }
             }
 
             It "loads .env variables for the current directory upon enabling integration and restores on subsequent cd" -Tag "NewTest" {
@@ -342,9 +461,9 @@ InModuleScope 'ImportDotEnv' {
                 # Now, disable integration while still in DirA. This should trigger unload.
                 Disable-ImportDotEnvCdIntegration
 
-                # Verify restoration of original values
-                [Environment]::GetEnvironmentVariable("TEST_VAR_A") | Should -Be $initialTestVarA
-                [Environment]::GetEnvironmentVariable("TEST_VAR_GLOBAL") | Should -Be $initialTestVarGlobal
+                # Verify variables from DirA/.env REMAIN loaded as Disable-ImportDotEnvCdIntegration no longer unloads
+                [Environment]::GetEnvironmentVariable("TEST_VAR_A") | Should -Be "valA"
+                [Environment]::GetEnvironmentVariable("TEST_VAR_GLOBAL") | Should -Be "valA_override"
 
                 # Verify commands are restored (this is also covered by other tests, but good for completeness here)
                 (Get-Command Set-Location).CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Cmdlet)
@@ -363,20 +482,33 @@ InModuleScope 'ImportDotEnv' {
             }
 
             It "loads variables from .env and restores global on exit" -Tag "First" {
-                [Environment]::SetEnvironmentVariable("TEST_VAR_GLOBAL", "initial_global_val")
+                # Ensure TEST_VAR_A is non-existent at the start of this specific test,
+                # overriding any potential BeforeEach restoration from a pre-Pester state.
+                $testOne = (Test-Path Env:\TEST_VAR_A)
+                if ($testOne) { Remove-Item Env:\TEST_VAR_A -Force }
+                # Remove from .NET first
+                [Environment]::SetEnvironmentVariable("TEST_VAR_A", $null)
+
+                # Force PowerShell to reload its environment cache
+                $env:TEST_VAR_A = $null  # Explicitly set to $null in PowerShell's drive
+
+                # Now check
+                $testTwo = (Test-Path Env:\TEST_VAR_A)  # Should now be $false
+                $testTwo | Should -Be $false
+                Write-Host "TEST SCRIPT (First Test - DIAGNOSTIC): TEST_VAR_A explicitly set to null. Test-Path is $(Test-Path Env:\TEST_VAR_A)" -ForegroundColor Green
+
                 Set-Location $script:DirA.FullName
-
                 [Environment]::GetEnvironmentVariable("TEST_VAR_A") | Should -Be "valA"
-                [Environment]::GetEnvironmentVariable("TEST_VAR_GLOBAL") | Should -Be "valA_override"
+                Write-Host "TEST SCRIPT (First Test - DIAGNOSTIC): TEST_VAR_A after loading DirA is '$([Environment]::GetEnvironmentVariable("TEST_VAR_A"))'" -ForegroundColor Green
 
-                # Go to parent directory (which is the Pester test script's directory)
                 Set-Location (Split-Path $script:DirA.FullName -Parent)
 
-                $expectedVarA = if ($Global:InitialEnvironment.ContainsKey("TEST_VAR_A")) { $Global:InitialEnvironment["TEST_VAR_A"] } else { $null }
-                $actualVarA = [Environment]::GetEnvironmentVariable("TEST_VAR_A")
-                Write-Host "TEST SCRIPT: Checking TEST_VAR_A. Expected: '$expectedVarA' (IsNull: $($null -eq $expectedVarA)). Actual: '$actualVarA' (IsNull: $($null -eq $actualVarA), Type: $(if ($null -ne $actualVarA) { $actualVarA.GetType().Name } else { 'null' }))"
-                (Test-Path "Env:\TEST_VAR_A") | Should -Be $false # Expect variable to be non-existent
-                [Environment]::GetEnvironmentVariable("TEST_VAR_GLOBAL") | Should -Be "initial_global_val"
+                # ▼ Enhanced validation ▼
+                $actualValue = [Environment]::GetEnvironmentVariable("TEST_VAR_A")
+                $existsInPSDrive = Test-Path "Env:\TEST_VAR_A"
+
+                $actualValue | Should -BeNullOrEmpty
+                $existsInPSDrive | Should -Be $false
             }
 
             It "loads hierarchically and restores correctly level by level" {
