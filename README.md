@@ -48,6 +48,9 @@ Import-Module ImportDotEnv
 
 # Set the initial environment variables
 Import-DotEnv
+
+# Enable Cd Integration (Optional: Enable if you are willing to have the variables loaded and unloaded automatically)
+Enable-ImportDotEnvCdIntegration
 ```
 
 ### Manual Installation
@@ -114,93 +117,44 @@ This will:
 
 3. Unload environment variables from .env files in the previous directory.
 
-# Example .env File
-Create a .env file in your project directory with the following content:
 
-```shell
-# .env file
-DATABASE_URL=postgres://user:password @localhost:5432/mydb
-API_KEY=12345
-DEBUG=true
-```
+### Listing Active Environment Variables
 
-When you run Import-DotEnv, the environment variables will be loaded into your session.
-
-## Functions
-### Import-DotEnv
-Loads environment variables from .env files in the current or parent directories.
-
-```powershell
-Import-DotEnv [-Path <string>]
-```
-
-- -Path: (Optional) Specifies the path to the .env file. Defaults to .env in the current directory.
-
-## Set-Location
-Overrides the built-in Set-Location cmdlet to automatically load .env files when changing directories.
-
-```powershell
-Set-Location -Path <string>
-```
-
-- -Path: The directory path to navigate to.
-
-## Get-EnvFilesUpstream
-Searches for .env files in the current directory and its parent directories.
-
-```powershell
-Get-EnvFilesUpstream [-Directory <string>]
-```
-
-- -Directory: (Optional) The directory to start searching from. Defaults to the current directory.
-
-# Examples
-## Load .env Files
-```powershell
-# Navigate to a directory with a .env file
-cd testme
-```
-
-And the output:
-
-```terminal
-The following .env files were added:
-↳ .\testme\.env
-
-Load .env file .\testme\.env:
-↳ Setting environment variable: VAR1
-```
+You can easily see which environment variables are currently managed by `ImportDotEnv`, what their effective values are, and which `.env` files contributed to their settings using the `-List` parameter.
 
 > [!TIP]
-> There is a hyperlink on the environment variables to Visual Studio Code with the reference to the line where it is set for the loaded variables.
+> This feature provides a clear, VS Code-friendly table of all variables managed by ImportDotEnv, including clickable hyperlinks for quick navigation and search.
 
-
-## Unload .env Files
-When you change directories, the module automatically unloads environment variables from the previous directory's .env files.
+**Usage:**
 
 ```powershell
-# Navigate to another directory
-cd ..
+Import-DotEnv -List
 ```
 
-And the output:
+**Output:**
 
-```terminal
-The following .env files were removed:
-↳ .\testme\.env
+| Name             | Defined In         |
+|------------------|--------------------|
+| GALLERY_2        | env                |
+| GALLERY_API_KEY  | .env               |
+| VK_ADD_LAYER_PATH| ..\baseDir\.env    |
 
-Unload .env file .\testme\.env:
-↳ Unsetting environment variable: VAR1
-```
 
-> [!TIP]
-> There is a hyperlink on the environment variables to Visual Studio Code with the reference to the line where it is set for the unloaded variables as well.
+- **Name**: The environment variable name. In supported terminals (like VS Code or Windows Terminal), this will be a clickable hyperlink that opens a search for the variable in your workspace.
+- **Defined In**: Lists the `.env` files that define this variable, shown relative to your current directory. If a variable is defined in multiple `.env` files, each file is listed on a new line.
 
-Check for .env Files
-```powershell
-# Find .env files in the current directory and its parents
-Get-EnvFilesUpstream
-```
+> [!NOTE]
+> The value shown for each variable is the one that took precedence according to the loading hierarchy. If no .env configuration is currently active (e.g., after `Import-DotEnv -Unload` or if no .env files were found on the last load), a message will be displayed instead of the table.
+
+---
+
+## Additional Features
+
+* **Efficient Variable Management:** Only variables that are new, removed, or have changed values are set/unset when changing directories. Unchanged variables are not redundantly reloaded or printed.
+* **Smart Output:** The module only prints a ".env file" header if there are actual variable actions for that file. Restoration/unload output is grouped by file, and headers are only shown if there are actions for that file.
+* **Pre-existing Variable Restoration:** If a variable existed before any `.env` file was loaded (e.g., a global or user environment variable), it will be restored to its original value when unloading or changing directories, even if it was overwritten by a `.env` file.
+* **No Redundant Actions:** The module prevents duplicate or unnecessary file headers and does not print a file header if there are no actions for that file.
+* **Accurate Hierarchical Restoration:** When loading multiple `.env` files hierarchically, the original value for each variable is captured before any are set, ensuring correct restoration even in complex scenarios.
 
 # Contributing
 Contributions are welcome! If you'd like to contribute to this project, please follow these steps:

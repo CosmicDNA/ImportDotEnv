@@ -37,12 +37,22 @@ InModuleScope 'ImportDotEnv' {
             }
 
             # Create temporary directory structure for tests
-            $script:TestRoot = Join-Path $env:TEMP "ImportDotEnvPesterTests" # Changed name to avoid conflict with previous example
+            $script:TestRoot = Join-Path $env:TEMP "ImportDotEnvPesterTests"
             if (Test-Path $script:TestRoot) {
                 Write-Host "BeforeAll: Removing existing TestRoot '$script:TestRoot'"
                 Remove-Item $script:TestRoot -Recurse -Force
             }
             New-Item -Path $script:TestRoot -ItemType Directory | Out-Null
+
+            # --- New: Create a parent directory with a .env file for cross-directory restoration test ---
+            $script:ParentDir = Split-Path $script:TestRoot -Parent
+            $script:ParentEnvPath = Join-Path $script:ParentDir ".env"
+            Set-Content -Path $script:ParentEnvPath -Value "VK_ADD_LAYER_PATH=parent_value"
+            Write-Host "BeforeAll: Content of parent .env is '$(Get-Content $script:ParentEnvPath -Raw)'"
+
+            $script:DirWithOwnEnv = New-Item -Path (Join-Path $script:TestRoot "DirWithOwnEnv") -ItemType Directory
+            Set-Content -Path (Join-Path $script:DirWithOwnEnv.FullName ".env") -Value "GALLERY_API_KEY=abc123`nGALLERY_2=def456"
+            Write-Host "BeforeAll: Content of DirWithOwnEnv/.env is '$(Get-Content (Join-Path $script:DirWithOwnEnv.FullName ".env") -Raw)'"
 
             $script:DirA = New-Item -Path (Join-Path $script:TestRoot "dirA") -ItemType Directory
             Set-Content -Path (Join-Path $script:DirA.FullName ".env") -Value "TEST_VAR_A=valA`nTEST_VAR_GLOBAL=valA_override"
@@ -594,6 +604,43 @@ InModuleScope 'ImportDotEnv' {
                 # Go to parent directory
                 Set-Location (Split-Path $script:NonEnvDir.FullName -Parent)
                 [Environment]::GetEnvironmentVariable("TEST_VAR_GLOBAL") | Should -Be $originalValue
+            }
+        }
+
+        Context "Parent .env should not be restored when leaving subdir with its own .env" {
+            It "does not restore parent .env variables when leaving a subdir with its own .env" {
+                # Setup: ensure VK_ADD_LAYER_PATH is not set
+                [Environment]::SetEnvironmentVariable("VK_ADD_LAYER_PATH", $null)
+                [Environment]::SetEnvironmentVariable("GALLERY_API_KEY", $null)
+                [Environment]::SetEnvironmentVariable("GALLERY_2", $null)
+                if (Test-Path Env:\VK_ADD_LAYER_PATH) { Remove-Item Env:\VK_ADD_LAYER_PATH -Force }
+                if (Test-Path Env:\GALLERY_API_KEY) { Remove-Item Env:\GALLERY_API_KEY -Force }
+                if (Test-Path Env:\GALLERY_2) { Remove-Item Env:\GALLERY_2 -Force }
+
+                # Mock Get-EnvFilesUpstream to simulate parent and child .env
+                Mock Get-EnvFilesUpstream {
+                    param($Directory)
+                    $resolvedDir = Convert-Path $Directory
+                    if ($resolvedDir -eq $script:DirWithOwnEnv.FullName) {
+                        return @($script:ParentEnvPath, (Join-Path $script:DirWithOwnEnv.FullName ".env"))
+                    }
+                    if ($resolvedDir -eq $script:ParentDir) {
+                        return @($script:ParentEnvPath)
+                    }
+                    return @()
+                } -ModuleName ImportDotEnv
+
+                # Go to DirWithOwnEnv (should load both parent and own .env)
+                Set-Location $script:DirWithOwnEnv.FullName
+                [Environment]::GetEnvironmentVariable("VK_ADD_LAYER_PATH") | Should -Be "parent_value"
+                [Environment]::GetEnvironmentVariable("GALLERY_API_KEY") | Should -Be "abc123"
+                [Environment]::GetEnvironmentVariable("GALLERY_2") | Should -Be "def456"
+
+                # Go up to parent (should only restore/unset GALLERY_API_KEY and GALLERY_2, not VK_ADD_LAYER_PATH)
+                Set-Location $script:ParentDir
+                [Environment]::GetEnvironmentVariable("VK_ADD_LAYER_PATH") | Should -Be "parent_value"
+                [Environment]::GetEnvironmentVariable("GALLERY_API_KEY") | Should -Be $null
+                [Environment]::GetEnvironmentVariable("GALLERY_2") | Should -Be $null
             }
         }
     } # End of Describe "Import-DotEnv Core and Integration Tests"
