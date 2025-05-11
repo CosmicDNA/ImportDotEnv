@@ -126,24 +126,67 @@ function Format-EnvFilePath {
   return $relativePath
 }
 
+function Parse-EnvFile {
+    param([string]$FilePath)
+    $vars = @{}
+    if (-not (Test-Path -LiteralPath $FilePath -PathType Leaf)) { return $vars }
+    $lines = Get-Content -Path $FilePath -Encoding UTF8 -ErrorAction SilentlyContinue
+    $lineNumber = 0
+    foreach ($line in $lines) {
+        $lineNumber++
+        if ($line -match '^[ \t]*#') { continue }
+        if ($line -match '^[ \t]*$') { continue }
+        if ($line -match '^([^=]+)=(.*)$') {
+            $varName = $Matches[1].Trim()
+            $varValue = $Matches[2].Trim()
+            $vars[$varName] = @{ Value = $varValue; Line = $lineNumber }
+        }
+    }
+    return $vars
+}
+
+function Set-EnvVar {
+    param(
+        [string]$Name,
+        [string]$Value
+    )
+    [Environment]::SetEnvironmentVariable($Name, $Value)
+}
+
+function Restore-EnvVar {
+    param(
+        [string]$Name,
+        $OriginalValue
+    )
+    if ($null -eq $OriginalValue) {
+        [Environment]::SetEnvironmentVariable($Name, $null, 'Process')
+        Remove-Item "Env:\$Name" -Force -ErrorAction SilentlyContinue
+    } else {
+        [Environment]::SetEnvironmentVariable($Name, $OriginalValue)
+    }
+}
+
+function Format-VarHyperlink {
+    param(
+        [string]$VarName,
+        [string]$FilePath,
+        [int]$LineNumber
+    )
+    $fileUrl = "vscode://file/${FilePath}:${LineNumber}"
+    return "$script:e]8;;$fileUrl$script:e\$VarName$script:e]8;;$script:e\"
+}
+
 # --- Helper function to get effective environment variables from a list of .env files ---
 function Get-EnvVarsFromFiles {
-  param([string[]]$Files, [string]$BasePath) # BasePath is for context if needed, not directly used in this version
-  $vars = @{}
-  foreach ($file in $Files) {
-    if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { continue }
-    $lines = Get-Content -Path $file -Encoding UTF8 -ErrorAction SilentlyContinue
-    foreach ($line in $lines) {
-      if ($line -match '^[ \t]*#') { continue } # Skip comments
-      if ($line -match '^[ \t]*$') { continue }   # Skip empty lines
-      if ($line -match '^([^=]+)=(.*)$') {
-        $varName = $Matches[1].Trim()
-        $varValue = $Matches[2].Trim()
-        $vars[$varName] = $varValue # Later files override earlier ones for the same variable
-      }
+    param([string[]]$Files, [string]$BasePath) # BasePath is for context if needed, not directly used in this version
+    $vars = @{}
+    foreach ($file in $Files) {
+        $parsed = Parse-EnvFile -FilePath $file
+        foreach ($varName in $parsed.Keys) {
+            $vars[$varName] = $parsed[$varName].Value
+        }
     }
-  }
-  return $vars
+    return $vars
 }
 
 function Import-DotEnv {
@@ -337,12 +380,6 @@ function Import-DotEnv {
           if ($null -eq $originalValue) {
             [Environment]::SetEnvironmentVariable($varName, $null, 'Process')
             Remove-Item "Env:\$varName" -Force -ErrorAction SilentlyContinue
-            $retryCount = 0
-            while ($retryCount -lt 2 -and (Test-Path "Env:\$varName")) {
-              Remove-Item "Env:\$varName" -Force -ErrorAction SilentlyContinue
-              $retryCount++
-              # Removed Start-Sleep for performance
-            }
           } else {
             [Environment]::SetEnvironmentVariable($varName, $originalValue)
           }
@@ -362,12 +399,6 @@ function Import-DotEnv {
         if ($null -eq $originalValue) {
           [Environment]::SetEnvironmentVariable($varName, $null, 'Process')
           Remove-Item "Env:\$varName" -Force -ErrorAction SilentlyContinue
-          $retryCount = 0
-          while ($retryCount -lt 2 -and (Test-Path "Env:\$varName")) {
-            Remove-Item "Env:\$varName" -Force -ErrorAction SilentlyContinue
-            $retryCount++
-            # Removed Start-Sleep for performance
-          }
         } else {
           [Environment]::SetEnvironmentVariable($varName, $originalValue)
         }
@@ -378,39 +409,7 @@ function Import-DotEnv {
         Write-Host $hyperlinkedVarName -ForegroundColor Yellow
       }
     }
-    # --- Restore any original env vars not already handled (e.g. global/pre-existing vars) ---
-    # The $varsToUnset (partitioned into $varsWithFile and $varsNoFile) should cover all variables
-    # from the previous .env configuration ($prevVars) that need to be restored.
-    # This block for "unhandledVars" is likely redundant if $varsToUnset is comprehensive and correctly
-    # uses $script:trueOriginalEnvironmentVariables for restoration values.
-    # $handledVars = @($varsWithFile + $varsNoFile) # These are all from $varsToUnset
-    # $unhandledVars = $script:trueOriginalEnvironmentVariables.Keys | Where-Object { $handledVars -notcontains $_ -and $prevVars.ContainsKey($_) }
-    # if ($unhandledVars.Count -gt 0) {
-    #   Write-Host "Restoring pre-existing environment variables (unhandled by file association):" -ForegroundColor Yellow
-    #   foreach ($varName in $unhandledVars) {
-    #     $originalValue = $script:trueOriginalEnvironmentVariables[$varName]
-    #     if ($null -eq $originalValue) {
-    #       [Environment]::SetEnvironmentVariable($varName, $null, 'Process')
-    #       Remove-Item "Env:\$varName" -Force -ErrorAction SilentlyContinue
-    #       $retryCount = 0
-    #       while ($retryCount -lt 3 -and (Test-Path "Env:\$varName")) {
-    #         Remove-Item "Env:\$varName" -Force -ErrorAction SilentlyContinue
-    #         $retryCount++
-    #         Start-Sleep -Milliseconds 100
-    #       }
-    #     } else {
-    #       [Environment]::SetEnvironmentVariable($varName, $originalValue)
-    #     }
-    #     $searchUrl = "vscode://search/search?query=$([System.Uri]::EscapeDataString($varName))"
-    #     $hyperlinkedVarName = "$script:e]8;;$searchUrl$script:e\$varName$script:e]8;;$script:e\"
-    #     $restoredActionText = if ($null -eq $originalValue) { "Unset" } else { "Restored" }
-    #     Write-Host "  $script:itemiser $restoredActionText environment variable: " -NoNewline
-    #     Write-Host $hyperlinkedVarName -ForegroundColor Yellow
-    #   }
-    # }
   }
-  # DO NOT CLEAR $script:trueOriginalEnvironmentVariables. This is the critical change for differential behavior.
-  # $script:trueOriginalEnvironmentVariables.Clear() # This line is removed.
 
   Write-Debug "MODULE Import-DotEnv (Load Phase - Start): Current trueOriginalEnvironmentVariables keys before capture: $($script:trueOriginalEnvironmentVariables.Keys -join ', ')"
   # --- Load Phase: Ensure all variables in currVars are set to their correct value (even if previously shadowed) ---
