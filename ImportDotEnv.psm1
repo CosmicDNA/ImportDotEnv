@@ -135,6 +135,19 @@ function Parse-EnvFile {
     return $vars
 }
 
+# --- Helper: Parse a single .env line into [name, value] or $null ---
+function Parse-EnvLine {
+  param([string]$Line)
+  if ([string]::IsNullOrWhiteSpace($Line)) { return $null }
+  $trimmed = $Line.TrimStart()
+  if ($trimmed.StartsWith('#')) { return $null }
+  $split = $Line.Split('=', 2)
+  if ($split.Count -eq 2) {
+    return @($split[0].Trim(), $split[1].Trim())
+  }
+  return $null
+}
+
 function Format-VarHyperlink {
     param(
         [string]$VarName,
@@ -289,7 +302,7 @@ Parse-EnvFileInRunspace -LocalFilePath $PathToParse
 }
 
 function Import-DotEnv {
-  [CmdletBinding(DefaultParameterSetName = 'Load', HelpUri = 'https://github.com/CosmicDNA/ImportDotEnv#readme')] # Added HelpUri
+  [CmdletBinding(DefaultParameterSetName = 'Load', HelpUri = 'https://github.com/CosmicDNA/ImportDotEnv#readme')]
   param(
     [Parameter(ParameterSetName = 'Load', Position = 0, ValueFromPipelineByPropertyName = $true)]
     [string]$Path,
@@ -297,7 +310,7 @@ function Import-DotEnv {
     [Parameter(ParameterSetName = 'Unload')]
     [switch]$Unload,
 
-    [Parameter(ParameterSetName = 'Help')] # New parameter set for Help
+    [Parameter(ParameterSetName = 'Help')]
     [switch]$Help,
 
     [Parameter(ParameterSetName = 'List')]
@@ -306,11 +319,27 @@ function Import-DotEnv {
 
   if ($PSCmdlet.ParameterSetName -eq 'Unload') {
     Write-Debug "MODULE Import-DotEnv: Called with -Unload switch."
-    # ... (rest of Unload logic remains the same)
+    $varsFromLastLoad = Get-EnvVarsFromFiles -Files $script:previousEnvFiles -BasePath $script:previousWorkingDirectory
+
+    if ($varsFromLastLoad.Count -gt 0) {
+      Write-Host "`nUnloading active .env configuration(s)..." -ForegroundColor Yellow
+
+      $allVarsToRestore = $varsFromLastLoad.Keys
+      $varsToRestoreByFileMap = Get-VarsToRestoreByFileMap -Files $script:previousEnvFiles -VarsToRestore $allVarsToRestore
+
+      $varsCoveredByFileMap = $varsToRestoreByFileMap.Values | ForEach-Object { $_ } | Sort-Object -Unique
+      $varsToRestoreNoFileAssociation = $allVarsToRestore | Where-Object { $varsCoveredByFileMap -notcontains $_ }
+
+      Restore-EnvVars -VarsToRestoreByFileMap $varsToRestoreByFileMap -VarNames $varsToRestoreNoFileAssociation -TrueOriginalEnvironmentVariables $script:trueOriginalEnvironmentVariables -BasePath $script:previousWorkingDirectory
+
+      $script:previousEnvFiles = @()
+      $script:previousWorkingDirectory = "STATE_AFTER_EXPLICIT_UNLOAD"
+      Write-Host "Environment restored. Module state reset." -ForegroundColor Green
+    }
+    return
   }
 
-  # --- Help Parameter Set Logic ---
-  if ($PSCmdlet.ParameterSetName -eq 'Help' -or $Help) { # Check ParameterSetName or direct switch
+  if ($PSCmdlet.ParameterSetName -eq 'Help' -or $Help) {
     Write-Host @"
 
 `e[1mImport-DotEnv Module Help`e[0m
@@ -338,39 +367,6 @@ manage environment variables as you navigate directories.
 
 For `Set-Location` integration, use `Enable-ImportDotEnvCdIntegration` and `Disable-ImportDotEnvCdIntegration`.
 "@
-    return
-  }
-
-  if ($PSCmdlet.ParameterSetName -eq 'Unload') { # Moved Unload logic down to keep Help check first
-    $varsFromLastLoad = Get-EnvVarsFromFiles -Files $script:previousEnvFiles -BasePath $script:previousWorkingDirectory
-
-    if ($varsFromLastLoad.Count -gt 0) {
-      Write-Host "`nUnloading active .env configuration..." -ForegroundColor Yellow
-      foreach ($varName in $varsFromLastLoad.Keys) {
-        if (-not $script:trueOriginalEnvironmentVariables.ContainsKey($varName)) {
-            Write-Debug "MODULE Import-DotEnv (-Unload): No true original value recorded for '$varName'. Skipping restoration."
-            continue
-        }
-        $originalValue = $script:trueOriginalEnvironmentVariables[$varName]
-        if ($null -eq $originalValue) {
-          Write-Debug "MODULE: Removing '$varName' (original value was null)"
-          [Environment]::SetEnvironmentVariable($varName, $null, 'Process')
-          Remove-Item "Env:\$varName" -Force -ErrorAction SilentlyContinue
-        } else {
-          [Environment]::SetEnvironmentVariable($varName, $originalValue, 'Process')
-        }
-        $searchUrl = "vscode://search/search?query=$([System.Uri]::EscapeDataString($varName))"
-        $hyperlinkedVarName = "$script:e]8;;$searchUrl$script:e\$varName$script:e]8;;$script:e\"
-        $restoredActionText = if ($null -eq $originalValue) { "Unset" } else { "Restored" }
-        Write-Host "  $script:itemiser $restoredActionText environment variable: " -NoNewline
-        Write-Host $hyperlinkedVarName -ForegroundColor Yellow
-      }
-      $script:previousEnvFiles = @()
-      $script:previousWorkingDirectory = "STATE_AFTER_EXPLICIT_UNLOAD"
-      Write-Host "Environment restored. Module state reset." -ForegroundColor Green
-    } else {
-      Write-Host "No active .env configuration found by the module to unload." -ForegroundColor Magenta
-    }
     return
   }
 
@@ -451,66 +447,10 @@ For `Set-Location` integration, use `Enable-ImportDotEnvCdIntegration` and `Disa
   }
 
   if ($varsToUnsetOrRestore.Count -gt 0) {
-    $varsToUnsetByFileMap = @{}
-    foreach ($fileToScan in $script:previousEnvFiles) {
-      if (-not (Test-Path -LiteralPath $fileToScan -PathType Leaf)) { continue }
-      try {
-        $lines = [System.IO.File]::ReadLines($fileToScan)
-        foreach ($line in $lines) {
-          if ($line -match '^[ \t]*#') { continue }
-          if ($line -match '^[ \t]*$') { continue }
-          if ($line -match '^([^=]+)=(.*)$') {
-            $parsedVarName = $Matches[1].Trim()
-            if ($varsToUnsetOrRestore -contains $parsedVarName) {
-              if (-not $varsToUnsetByFileMap.ContainsKey($fileToScan)) { $varsToUnsetByFileMap[$fileToScan] = [System.Collections.Generic.List[string]]::new() }
-              if (-not $varsToUnsetByFileMap[$fileToScan].Contains($parsedVarName)) {
-                  $varsToUnsetByFileMap[$fileToScan].Add($parsedVarName)
-              }
-            }
-          }
-        }
-      } catch {
-        Write-Warning "Import-DotEnv (Unload Phase): Error reading file '$fileToScan'. Skipping. Error: $($_.Exception.Message)"
-      }
-    }
-    $varsActuallyRestoredFromFile = $varsToUnsetByFileMap.Values | ForEach-Object { $_ } | Sort-Object -Unique
-    $varsToRestoreNoFileAssociation = $varsToUnsetOrRestore | Where-Object { $varsActuallyRestoredFromFile -notcontains $_ }
-
-    if ($varsToUnsetByFileMap.Count -gt 0) {
-      foreach ($fileKey in $varsToUnsetByFileMap.Keys) {
-        $varsForFile = $varsToUnsetByFileMap[$fileKey]
-        if ($varsForFile.Count -eq 0) { continue }
-        $formattedPath = Format-EnvFilePath -Path $fileKey -BasePath $PWD.Path
-        Write-Host "$script:itemiserA Restoring .env file ${formattedPath}:" -ForegroundColor Yellow
-        foreach ($varNameToRestore in $varsForFile) {
-          $originalValue = $script:trueOriginalEnvironmentVariables[$varNameToRestore]
-          if ($null -eq $originalValue) {
-            [Environment]::SetEnvironmentVariable($varNameToRestore, $null, 'Process'); Remove-Item "Env:\$varNameToRestore" -Force -ErrorAction SilentlyContinue
-          } else {
-            [Environment]::SetEnvironmentVariable($varNameToRestore, $originalValue)
-          }
-          $searchUrl = "vscode://search/search?query=$([System.Uri]::EscapeDataString($varNameToRestore))"
-          $hyperlinkedVarName = "$script:e]8;;$searchUrl$script:e\$varNameToRestore$script:e]8;;$script:e\"
-          $restoredActionText = if ($null -eq $originalValue) { "Unset" } else { "Restored" }
-          Write-Host "  $script:itemiser $restoredActionText environment variable: " -NoNewline; Write-Host $hyperlinkedVarName -ForegroundColor Yellow
-        }
-      }
-    }
-    if ($varsToRestoreNoFileAssociation.Count -gt 0) {
-      Write-Host "Restoring environment variables not associated with any .env file:" -ForegroundColor Yellow
-      foreach ($varNameToRestore in $varsToRestoreNoFileAssociation) {
-        $originalValue = $script:trueOriginalEnvironmentVariables[$varNameToRestore]
-        if ($null -eq $originalValue) {
-          [Environment]::SetEnvironmentVariable($varNameToRestore, $null, 'Process'); Remove-Item "Env:\$varNameToRestore" -Force -ErrorAction SilentlyContinue
-        } else {
-          [Environment]::SetEnvironmentVariable($varNameToRestore, $originalValue)
-        }
-        $searchUrl = "vscode://search/search?query=$([System.Uri]::EscapeDataString($varNameToRestore))"
-        $hyperlinkedVarName = "$script:e]8;;$searchUrl$script:e\$varNameToRestore$script:e]8;;$script:e\"
-        $restoredActionText = if ($null -eq $originalValue) { "Unset" } else { "Restored" }
-        Write-Host "  $script:itemiser $restoredActionText environment variable: " -NoNewline; Write-Host $hyperlinkedVarName -ForegroundColor Yellow
-      }
-    }
+    $varsToRestoreByFileMap = Get-VarsToRestoreByFileMap -Files $script:previousEnvFiles -VarsToRestore $varsToUnsetOrRestore
+    $varsCoveredByFileMap = $varsToRestoreByFileMap.Values | ForEach-Object { $_ } | Sort-Object -Unique
+    $varsToRestoreNoFileAssociation = $varsToUnsetOrRestore | Where-Object { $varsCoveredByFileMap -notcontains $_ }
+    Restore-EnvVars -VarsToRestoreByFileMap $varsToRestoreByFileMap -VarNames $varsToRestoreNoFileAssociation -TrueOriginalEnvironmentVariables $script:trueOriginalEnvironmentVariables -BasePath $PWD.Path
   }
 
   # --- Load Phase ---
@@ -686,3 +626,105 @@ Export-ModuleMember -Function Import-DotEnv,
 Enable-ImportDotEnvCdIntegration,
 Disable-ImportDotEnvCdIntegration,
 Invoke-ImportDotEnvSetLocationWrapper
+
+function Get-EnvVarNamesFromFile {
+  param([string]$FilePath)
+  if (-not (Test-Path -LiteralPath $FilePath -PathType Leaf)) { return @() }
+  try {
+    return [System.IO.File]::ReadLines($FilePath) | ForEach-Object {
+      $parsed = Parse-EnvLine $_
+      if ($null -ne $parsed) { $parsed[0] }
+    } | Where-Object { $_ }
+  } catch {
+    Write-Warning "Get-EnvVarNamesFromFile: Error reading file '$FilePath'. Skipping. Error: $($_.Exception.Message)"
+    return @()
+  }
+}
+
+function Get-VarsToRestoreByFileMap {
+  param(
+    [string[]]$Files,
+    [string[]]$VarsToRestore
+  )
+  $varsToUnsetByFileMap = @{}
+  foreach ($fileToScan in $Files) {
+    foreach ($parsedVarName in Get-EnvVarNamesFromFile -FilePath $fileToScan) {
+      if ($VarsToRestore -contains $parsedVarName) {
+        if (-not $varsToUnsetByFileMap.ContainsKey($fileToScan)) { $varsToUnsetByFileMap[$fileToScan] = [System.Collections.Generic.List[string]]::new() }
+        $varsToUnsetByFileMap[$fileToScan].Add($parsedVarName)
+      }
+    }
+  }
+  return $varsToUnsetByFileMap
+}
+
+function Set-OrUnset-EnvVar {
+  param(
+    [string]$Name,
+    [object]$Value
+  )
+  if ($null -eq $Value) {
+    [Environment]::SetEnvironmentVariable($Name, $null, 'Process')
+    Remove-Item "Env:\$Name" -Force -ErrorAction SilentlyContinue
+  } else {
+    [Environment]::SetEnvironmentVariable($Name, $Value)
+  }
+}
+
+function Write-EnvVarAction {
+  param(
+    [string]$ActionText,
+    [string]$VarName,
+    [string]$Color = 'Yellow',
+    [string]$Hyperlink = $null
+  )
+  Write-Host "  $script:itemiser $ActionText environment variable: " -NoNewline
+  Write-Host ($Hyperlink ?? $VarName) -ForegroundColor $Color
+}
+
+function Restore-EnvVar {
+  param(
+    [string]$VarName,
+    [hashtable]$TrueOriginalEnvironmentVariables,
+    [string]$SourceFile = $null
+  )
+  $originalValue = $TrueOriginalEnvironmentVariables[$VarName]
+  Set-OrUnset-EnvVar -Name $VarName -Value $originalValue
+  $restoredActionText = if ($null -eq $originalValue) { "Unset" } else { "Restored" }
+  $hyperlink = if ($SourceFile) {
+    Format-VarHyperlink -VarName $VarName -FilePath $SourceFile -LineNumber 1
+  } else {
+    # Fallback: search hyperlink
+    $searchUrl = "vscode://search/search?query=$([System.Uri]::EscapeDataString($VarName))"
+    "$script:e]8;;$searchUrl$script:e\$VarName$script:e]8;;$script:e\"
+  }
+  Write-EnvVarAction -ActionText $restoredActionText -VarName $VarName -Color 'Yellow' -Hyperlink $hyperlink
+}
+
+function Restore-EnvVars {
+  param(
+    [hashtable]$VarsToRestoreByFileMap = $null,
+    [string[]]$VarNames = $null,
+    [hashtable]$TrueOriginalEnvironmentVariables,
+    [string]$BasePath = $PWD.Path
+  )
+  $restorationActions = @()
+  if ($VarsToRestoreByFileMap) {
+    $VarsToRestoreByFileMap.GetEnumerator() | ForEach-Object {
+      $fileKey = $_.Key; $_.Value | ForEach-Object { $restorationActions += [PSCustomObject]@{ VarName = $_; SourceFile = $fileKey } }
+    }
+  }
+  if ($VarNames) {
+    $VarNames | ForEach-Object { $restorationActions += [PSCustomObject]@{ VarName = $_; SourceFile = $null } }
+  }
+  $restorationActions | Group-Object SourceFile | ForEach-Object {
+    $fileKey = $_.Name
+    Write-Host ($fileKey ? "$script:itemiserA Restoring .env file $(Format-EnvFilePath -Path $fileKey -BasePath $BasePath):" : "Restoring environment variables not associated with any .env file:") -ForegroundColor Yellow
+    $_.Group | ForEach-Object { Restore-EnvVar -VarName $_.VarName -TrueOriginalEnvironmentVariables $TrueOriginalEnvironmentVariables -SourceFile $_.SourceFile }
+  }
+}
+
+function Show-EnvVarTable {
+  param([Parameter(Mandatory)][array]$OutputObjects)
+  $OutputObjects | Format-Table -AutoSize
+}
