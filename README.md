@@ -148,6 +148,37 @@ Import-DotEnv -List
 
 ---
 
+## Getting Help
+
+> [!TIP]
+> You can always get detailed help and usage examples for the main `Import-DotEnv` command directly in your terminal!
+
+### Using the `-Help` Parameter
+
+The `-Help` switch is supported only by the main `Import-DotEnv` command. Use it for quick, in-console help with a summary of parameters, usage, and examples.
+
+**Example:**
+
+```powershell
+Import-DotEnv -Help
+```
+
+This will print concise help and usage information for the `Import-DotEnv` command.
+
+> [!TIP]
+> You can also use PowerShell's `Get-Help` command for more detailed help, including full parameter descriptions and examples:
+>
+> ```powershell
+> Get-Help Import-DotEnv -Full
+> ```
+
+> [!NOTE]
+> If you see minimal help output, run `Update-Help` to download the latest help content for all modules.
+
+
+
+---
+
 ## Additional Features
 
 * **Efficient Variable Management:** Only variables that are new, removed, or have changed values are set/unset when changing directories. Unchanged variables are not redundantly reloaded or printed.

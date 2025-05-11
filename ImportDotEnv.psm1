@@ -25,84 +25,64 @@ function Get-RelativePath {
   )
 
   try {
-    $absolutePath = [Path]::GetFullPath($Path)
-    $absoluteBasePath = [Path]::GetFullPath($BasePath)
+    $absTarget = [System.IO.Path]::GetFullPath($Path)
+    $absBase = [System.IO.Path]::GetFullPath($BasePath)
+
+    if ($absTarget.Equals($absBase, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return "."
+    }
+
+    # Ensure BasePath for Uri ends with a directory separator.
+    $uriBaseNormalized = $absBase
+    if (-not $uriBaseNormalized.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {
+        $uriBaseNormalized += [System.IO.Path]::DirectorySeparatorChar
+    }
+    $baseUri = [System.Uri]::new($uriBaseNormalized)
+    $targetUri = [System.Uri]::new($absTarget)
+
+    $relativeUri = $baseUri.MakeRelativeUri($targetUri)
+    $relativePath = [System.Uri]::UnescapeDataString($relativeUri.ToString())
+
+    return $relativePath.Replace('/', [System.IO.Path]::DirectorySeparatorChar)
   }
   catch {
+    Write-Warning "Get-RelativePath: Error calculating relative path for Target '$Path' from Base '$BasePath'. Error: $($_.Exception.Message). Falling back to original target path."
     return $Path
   }
-
-  if ($absolutePath -eq $absoluteBasePath) {
-    return "."
-  }
-
-  $separator = [Path]::DirectorySeparatorChar
-  $splitOptions = [StringSplitOptions]::RemoveEmptyEntries
-
-  $pathSegments = $absolutePath.Split([Path]::DirectorySeparatorChar, $splitOptions)
-  $baseSegments = $absoluteBasePath.Split([Path]::DirectorySeparatorChar, $splitOptions)
-
-  $commonLength = 0
-  $minLength = [Math]::Min($pathSegments.Count, $baseSegments.Count)
-
-  while ($commonLength -lt $minLength -and
-    $pathSegments[$commonLength] -eq $baseSegments[$commonLength]) {
-    $commonLength++
-  }
-
-  if ($commonLength -eq 0) {
-    return $absolutePath
-  }
-
-  $relativePath = New-Object System.Text.StringBuilder
-  for ($i = $commonLength; $i -lt $baseSegments.Count; $i++) {
-    [void]$relativePath.Append("..$separator")
-  }
-
-  for ($i = $commonLength; $i -lt $pathSegments.Count; $i++) {
-    [void]$relativePath.Append($pathSegments[$i])
-    if ($i -lt $pathSegments.Count - 1) {
-      [void]$relativePath.Append($separator)
-    }
-  }
-
-  return $relativePath.ToString()
 }
 
 function Get-EnvFilesUpstream {
   [CmdletBinding()]
   param([string]$Directory = ".")
 
-  # ▼ Add path normalization ▼
-  $currentDir = [Path]::GetFullPath($Directory).TrimEnd('\').ToLower()
-  # ▲ Ensures consistent path formatting ▲
-
+  $currentDirNormalized = ""
   try {
+    $currentDirNormalized = [System.IO.Path]::GetFullPath($Directory).TrimEnd([System.IO.Path]::DirectorySeparatorChar).ToLowerInvariant()
     $resolvedPath = Convert-Path -Path $Directory -ErrorAction Stop
   }
   catch {
+    Write-Warning "Get-EnvFilesUpstream: Error resolving path '$Directory'. Error: $($_.Exception.Message). Defaulting to PWD."
     $resolvedPath = $PWD.Path
+    $currentDirNormalized = [System.IO.Path]::GetFullPath($resolvedPath).TrimEnd([System.IO.Path]::DirectorySeparatorChar).ToLowerInvariant()
   }
 
-  $envFiles = @()
-  $currentDir = $resolvedPath
+  $envFiles = [System.Collections.Generic.List[string]]::new()
+  $currentSearchDir = $resolvedPath
 
-  while ($currentDir) {
-    $envPath = Join-Path $currentDir ".env"
+  while ($currentSearchDir) {
+    $envPath = Join-Path $currentSearchDir ".env"
     if (Test-Path -LiteralPath $envPath -PathType Leaf) {
-      $envFiles += $envPath
+      $envFiles.Add($envPath)
     }
-    $parentDir = Split-Path -Path $currentDir -Parent
-    # Break loop cleanly when reaching root
-    if ($parentDir -eq $currentDir) { break }
-    $currentDir = $parentDir
+    $parentDir = Split-Path -Path $currentSearchDir -Parent
+    if ($parentDir -eq $currentSearchDir -or [string]::IsNullOrEmpty($parentDir)) { break }
+    $currentSearchDir = $parentDir
   }
 
   if ($envFiles.Count -gt 0) {
-    [Array]::Reverse($envFiles)
+    $envFiles.Reverse()
   }
-  # Ensure it always returns an array
-  return $envFiles
+  return [string[]]$envFiles
 }
 
 function Format-EnvFilePath {
@@ -129,10 +109,14 @@ function Format-EnvFilePath {
 function Parse-EnvFile {
     param([string]$FilePath)
     $vars = @{}
-    if (-not (Test-Path -LiteralPath $FilePath -PathType Leaf)) { return $vars }
+    if (-not ([System.IO.File]::Exists($FilePath))) {
+        Write-Debug "Parse-EnvFile: File '$FilePath' does not exist."
+        return $vars
+    }
     try {
         $lines = [System.IO.File]::ReadLines($FilePath)
     } catch {
+        Write-Warning "Parse-EnvFile: Error reading file '$FilePath'. Error: $($_.Exception.Message)"
         return $vars
     }
     $lineNumber = 0
@@ -145,73 +129,10 @@ function Parse-EnvFile {
         if ($split.Count -eq 2) {
             $varName = $split[0].Trim()
             $varValue = $split[1].Trim()
-            $vars[$varName] = @{ Value = $varValue; Line = $lineNumber }
+            $vars[$varName] = @{ Value = $varValue; Line = $lineNumber; SourceFile = $FilePath }
         }
     }
     return $vars
-}
-
-function Get-EnvVarsFromFiles {
-    param([string[]]$Files, [string]$BasePath)
-    $syncRoot = New-Object object
-    $vars = @{}
-    if ($Files.Count -eq 1) {
-        # Fast path for single file
-        $parsed = Parse-EnvFile -FilePath $Files[0]
-        foreach ($varName in $parsed.Keys) {
-            $vars[$varName] = $parsed[$varName].Value
-        }
-        return $vars
-    }
-    $actions = @()
-    foreach ($file in $Files) {
-        $actions += {
-            param($f)
-            $parsed = Parse-EnvFile -FilePath $f
-            [System.Threading.Monitor]::Enter($syncRoot)
-            try {
-                foreach ($varName in $parsed.Keys) {
-                    $vars[$varName] = $parsed[$varName].Value
-                }
-            } finally {
-                [System.Threading.Monitor]::Exit($syncRoot)
-            }
-        }.GetNewClosure()
-    }
-    [System.Threading.Tasks.Parallel]::ForEach($Files, [Action[string]]{
-        param($f)
-        $parsed = Parse-EnvFile -FilePath $f
-        [System.Threading.Monitor]::Enter($syncRoot)
-        try {
-            foreach ($varName in $parsed.Keys) {
-                $vars[$varName] = $parsed[$varName].Value
-            }
-        } finally {
-            [System.Threading.Monitor]::Exit($syncRoot)
-        }
-    })
-    return $vars
-}
-
-function Set-EnvVar {
-    param(
-        [string]$Name,
-        [string]$Value
-    )
-    [Environment]::SetEnvironmentVariable($Name, $Value)
-}
-
-function Restore-EnvVar {
-    param(
-        [string]$Name,
-        $OriginalValue
-    )
-    if ($null -eq $OriginalValue) {
-        [Environment]::SetEnvironmentVariable($Name, $null, 'Process')
-        Remove-Item "Env:\$Name" -Force -ErrorAction SilentlyContinue
-    } else {
-        [Environment]::SetEnvironmentVariable($Name, $OriginalValue)
-    }
 }
 
 function Format-VarHyperlink {
@@ -220,25 +141,155 @@ function Format-VarHyperlink {
         [string]$FilePath,
         [int]$LineNumber
     )
-    $fileUrl = "vscode://file/${FilePath}:${LineNumber}"
+    # Ensure FilePath is absolute for the hyperlink
+    $absFilePath = try { Resolve-Path -LiteralPath $FilePath -ErrorAction Stop } catch { $FilePath }
+    $fileUrl = "vscode://file/$($absFilePath):${LineNumber}"
     return "$script:e]8;;$fileUrl$script:e\$VarName$script:e]8;;$script:e\"
 }
 
 # --- Helper function to get effective environment variables from a list of .env files ---
 function Get-EnvVarsFromFiles {
-    param([string[]]$Files, [string]$BasePath) # BasePath is for context if needed, not directly used in this version
-    $vars = @{}
-    foreach ($file in $Files) {
-        $parsed = Parse-EnvFile -FilePath $file
-        foreach ($varName in $parsed.Keys) {
-            $vars[$varName] = $parsed[$varName].Value
+    param(
+        [string[]]$Files,
+        [string]$BasePath # BasePath is for context, not directly used in var aggregation here
+    )
+
+    if ($Files.Count -eq 0) {
+        return @{}
+    }
+
+    if ($Files.Count -eq 1) {
+        # Fast path for a single file. Parse-EnvFile returns the rich structure.
+        return Parse-EnvFile -FilePath $Files[0]
+    }
+
+    # For multiple files, use RunspacePool for parallel parsing.
+    $finalEffectiveVars = @{}
+    $parsedResults = New-Object "object[]" $Files.Count # To store results in order
+
+    # Define the script that will be run in each runspace.
+    # It includes a minimal Parse-EnvFile definition to ensure it's available and self-contained.
+    $scriptBlockText = @'
+param([string]$PathToParse)
+
+# Minimal Parse-EnvFile definition for use in isolated runspaces
+function Parse-EnvFileInRunspace {
+    param([string]$LocalFilePath)
+    $localVars = @{} # PowerShell hashtable literal is fine here, it's a PS runspace
+    # Directly use System.IO.File for existence and reading to minimize dependencies
+    if (-not ([System.IO.File]::Exists($LocalFilePath))) {
+        return $localVars
+    }
+    try {
+        $fileLines = [System.IO.File]::ReadLines($LocalFilePath)
+    } catch {
+        # Silently return empty on read error in this isolated context
+        return $localVars
+    }
+    $lineNum = 0
+    foreach ($txtLine in $fileLines) {
+        $lineNum++
+        if ([string]::IsNullOrWhiteSpace($txtLine)) { continue }
+        $trimmedTxtLine = $txtLine.TrimStart()
+        if ($trimmedTxtLine.StartsWith('#')) { continue }
+        $parts = $txtLine.Split('=', 2)
+        if ($parts.Count -eq 2) {
+            $name = $parts[0].Trim()
+            $val = $parts[1].Trim()
+            # This structure needs to match what the rest of the module expects
+            $localVars[$name] = @{ Value = $val; Line = $lineNum; SourceFile = $LocalFilePath }
         }
     }
-    return $vars
+    return $localVars
+}
+
+Parse-EnvFileInRunspace -LocalFilePath $PathToParse
+'@
+
+    # Determine a reasonable number of runspaces. Cap at 8 to avoid excessive resource use.
+    # Fix: [Math]::Min takes only two arguments. Nest calls for three values.
+    $maxRunspaces = [Math]::Min(8, [Math]::Min($Files.Count, ([System.Environment]::ProcessorCount * 2)))
+    $minRunspaces = 1
+
+    $iss = [System.Management.Automation.Runspaces.InitialSessionState]::CreateDefault2()
+    # CreateDefault2 is generally good for providing access to common .NET types like System.IO.File
+
+    $runspacePool = $null
+    $psInstanceTrackers = [System.Collections.Generic.List[object]]::new()
+
+    try {
+        $runspacePool = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspacePool($minRunspaces, $maxRunspaces, $iss, $Host)
+        $runspacePool.Open()
+
+        for ($i = 0; $i -lt $Files.Count; $i++) {
+            $fileToParse = $Files[$i]
+            $ps = [PowerShell]::Create()
+            $ps.RunspacePool = $runspacePool
+            $null = $ps.AddScript($scriptBlockText).AddArgument($fileToParse)
+
+            $asyncResult = $ps.BeginInvoke()
+            $psInstanceTrackers.Add([PSCustomObject]@{
+                PowerShell    = $ps
+                AsyncResult   = $asyncResult
+                OriginalIndex = $i
+                FilePath      = $fileToParse # For logging/debugging
+            })
+        }
+
+        # Wait for all to complete and collect results
+        foreach ($tracker in $psInstanceTrackers) {
+            try {
+                $outputCollection = $tracker.PowerShell.EndInvoke($tracker.AsyncResult)
+
+                if ($tracker.PowerShell.Streams.Error.Count -gt 0) {
+                    foreach($err in $tracker.PowerShell.Streams.Error){
+                        Write-Warning "Error parsing file '$($tracker.FilePath)' in parallel: $($err.ToString())"
+                    }
+                    $parsedResults[$tracker.OriginalIndex] = @{}
+                } elseif ($outputCollection -ne $null -and $outputCollection.Count -eq 1) {
+                    $singleOutput = $outputCollection[0]
+                    if ($singleOutput -is [System.Collections.IDictionary]) { # Directly a hashtable
+                        $parsedResults[$tracker.OriginalIndex] = $singleOutput
+                    } elseif ($singleOutput -is [System.Management.Automation.PSObject] -and $singleOutput.BaseObject -is [System.Collections.IDictionary]) { # PSObject wrapping a hashtable
+                        $parsedResults[$tracker.OriginalIndex] = $singleOutput.BaseObject
+                    } else {
+                        Write-Warning "Unexpected output type from parallel parsing of '$($tracker.FilePath)'. Type: $($singleOutput.GetType().FullName)"
+                        $parsedResults[$tracker.OriginalIndex] = @{}
+                    }
+                } else {
+                    Write-Warning "No output or multiple outputs from parallel parsing of '$($tracker.FilePath)'. Output count: $($outputCollection.Count)"
+                    $parsedResults[$tracker.OriginalIndex] = @{}
+                }
+            } catch {
+                 Write-Warning "Exception during EndInvoke for file '$($tracker.FilePath)': $($_.Exception.Message)"
+                 $parsedResults[$tracker.OriginalIndex] = @{} # Store empty on exception
+            }
+        }
+    }
+    finally {
+        foreach ($tracker in $psInstanceTrackers) {
+            if ($tracker.PowerShell) {
+                $tracker.PowerShell.Dispose()
+            }
+        }
+        if ($runspacePool) {
+            $runspacePool.Close()
+            $runspacePool.Dispose()
+        }
+    }
+
+    # Sequentially merge the parsed results to ensure correct precedence.
+    foreach ($fileScopedVarsHashtable in $parsedResults) {
+        if ($null -eq $fileScopedVarsHashtable) { continue } # Skip if null (e.g. error during parsing)
+        foreach ($varNameKey in $fileScopedVarsHashtable.Keys) {
+            $finalEffectiveVars[$varNameKey] = $fileScopedVarsHashtable[$varNameKey]
+        }
+    }
+    return $finalEffectiveVars
 }
 
 function Import-DotEnv {
-  [CmdletBinding(DefaultParameterSetName = 'Load')]
+  [CmdletBinding(DefaultParameterSetName = 'Load', HelpUri = 'https://github.com/CosmicDNA/ImportDotEnv#readme')] # Added HelpUri
   param(
     [Parameter(ParameterSetName = 'Load', Position = 0, ValueFromPipelineByPropertyName = $true)]
     [string]$Path,
@@ -246,37 +297,66 @@ function Import-DotEnv {
     [Parameter(ParameterSetName = 'Unload')]
     [switch]$Unload,
 
+    [Parameter(ParameterSetName = 'Help')] # New parameter set for Help
+    [switch]$Help,
+
     [Parameter(ParameterSetName = 'List')]
     [switch]$List
   )
 
   if ($PSCmdlet.ParameterSetName -eq 'Unload') {
     Write-Debug "MODULE Import-DotEnv: Called with -Unload switch."
-    # Determine variables set by the last active .env configuration
+    # ... (rest of Unload logic remains the same)
+  }
+
+  # --- Help Parameter Set Logic ---
+  if ($PSCmdlet.ParameterSetName -eq 'Help' -or $Help) { # Check ParameterSetName or direct switch
+    Write-Host @"
+
+`e[1mImport-DotEnv Module Help`e[0m
+
+This module allows for hierarchical loading and unloading of .env files.
+It also provides integration with `Set-Location` (cd/sl) to automatically
+manage environment variables as you navigate directories.
+
+`e[1mUsage:`e[0m
+
+  `e[1mImport-DotEnv`e[0m [-Path <string>]
+    Loads .env files from the specified path (or current directory if no path given)
+    and its parent directories. Variables from deeper .env files take precedence.
+    Automatically unloads variables from previously loaded .env files if they are
+    no longer applicable or have changed.
+
+  `e[1mImport-DotEnv -Unload`e[0m
+    Unloads all variables set by the module and resets its internal state.
+
+  `e[1mImport-DotEnv -List`e[0m
+    Lists currently active variables and the .env files defining them.
+
+  `e[1mImport-DotEnv -Help`e[0m
+    Displays this help message.
+
+For `Set-Location` integration, use `Enable-ImportDotEnvCdIntegration` and `Disable-ImportDotEnvCdIntegration`.
+"@
+    return
+  }
+
+  if ($PSCmdlet.ParameterSetName -eq 'Unload') { # Moved Unload logic down to keep Help check first
     $varsFromLastLoad = Get-EnvVarsFromFiles -Files $script:previousEnvFiles -BasePath $script:previousWorkingDirectory
 
     if ($varsFromLastLoad.Count -gt 0) {
       Write-Host "`nUnloading active .env configuration..." -ForegroundColor Yellow
-
       foreach ($varName in $varsFromLastLoad.Keys) {
-        # Restore to the true original value stored by the module
         if (-not $script:trueOriginalEnvironmentVariables.ContainsKey($varName)) {
-            Write-Debug "MODULE Import-DotEnv (-Unload): No true original value recorded for '$varName'. Skipping restoration for it."
+            Write-Debug "MODULE Import-DotEnv (-Unload): No true original value recorded for '$varName'. Skipping restoration."
             continue
         }
         $originalValue = $script:trueOriginalEnvironmentVariables[$varName]
         if ($null -eq $originalValue) {
           Write-Debug "MODULE: Removing '$varName' (original value was null)"
-          # Remove from .NET environment (Process scope only)
           [Environment]::SetEnvironmentVariable($varName, $null, 'Process')
-          # Always attempt to remove from Env: drive at least once
-          # NOTE: Never pass -Scope to Remove-Item for Env: drive! It is not supported and will throw.
           Remove-Item "Env:\$varName" -Force -ErrorAction SilentlyContinue
-          $existsAfter = Test-Path "Env:\$varName"
-          $dotNetValAfter = [Environment]::GetEnvironmentVariable($varName, 'Process')
-          Write-Debug "MODULE Import-DotEnv (Unload): Final removal status for $varName - Exists in Env: $existsAfter, .NET value: '$dotNetValAfter'"
-        }
-        else {
+        } else {
           [Environment]::SetEnvironmentVariable($varName, $originalValue, 'Process')
         }
         $searchUrl = "vscode://search/search?query=$([System.Uri]::EscapeDataString($varName))"
@@ -285,13 +365,10 @@ function Import-DotEnv {
         Write-Host "  $script:itemiser $restoredActionText environment variable: " -NoNewline
         Write-Host $hyperlinkedVarName -ForegroundColor Yellow
       }
-      # DO NOT CLEAR $script:trueOriginalEnvironmentVariables here. It holds the actual pre-module state.
-      # $script:trueOriginalEnvironmentVariables.Clear() # This line is removed.
       $script:previousEnvFiles = @()
-      $script:previousWorkingDirectory = "STATE_AFTER_EXPLICIT_UNLOAD" # Mark state
+      $script:previousWorkingDirectory = "STATE_AFTER_EXPLICIT_UNLOAD"
       Write-Host "Environment restored. Module state reset." -ForegroundColor Green
-    }
-    else {
+    } else {
       Write-Host "No active .env configuration found by the module to unload." -ForegroundColor Magenta
     }
     return
@@ -303,243 +380,185 @@ function Import-DotEnv {
       Write-Host "No .env configuration is currently active or managed by ImportDotEnv." -ForegroundColor Magenta
       return
     }
-
-    # Get the final effective values of variables as per the last load
     $effectiveVars = Get-EnvVarsFromFiles -Files $script:previousEnvFiles -BasePath $script:previousWorkingDirectory
-
-    # Build a map of variable names to the list of files that define them
     $varToDefiningFilesMap = @{}
     foreach ($file in $script:previousEnvFiles) {
       if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { continue }
-      $lines = Get-Content -Path $file -Encoding UTF8 -ErrorAction SilentlyContinue
-      foreach ($line in $lines) {
-        if ($line -match '^[ \t]*#') { continue }
-        if ($line -match '^[ \t]*$') { continue }
-        if ($line -match '^([^=]+)=(.*)$') {
-          $varName = $Matches[1].Trim()
-          if (-not $varToDefiningFilesMap.ContainsKey($varName)) {
-            $varToDefiningFilesMap[$varName] = [System.Collections.Generic.List[string]]::new()
+      try {
+        $lines = [System.IO.File]::ReadLines($file)
+        foreach ($line in $lines) {
+          if ($line -match '^[ \t]*#') { continue }
+          if ($line -match '^[ \t]*$') { continue }
+          if ($line -match '^([^=]+)=(.*)$') {
+            $varName = $Matches[1].Trim()
+            if (-not $varToDefiningFilesMap.ContainsKey($varName)) {
+              $varToDefiningFilesMap[$varName] = [System.Collections.Generic.List[string]]::new()
+            }
+            $varToDefiningFilesMap[$varName].Add($file)
           }
-          $varToDefiningFilesMap[$varName].Add($file)
         }
+      } catch {
+        Write-Warning "Import-DotEnv (-List): Error reading file '$file'. Skipping. Error: $($_.Exception.Message)"
       }
     }
-
     $outputObjects = @()
-    foreach ($varName in ($effectiveVars.Keys | Sort-Object)) {
-      $varValue = $effectiveVars[$varName]
-
-      # Create hyperlink for Name
-      $searchUrl = "vscode://search/search?query=$([System.Uri]::EscapeDataString($varName))"
-      $hyperlinkedVarName = "$($script:e)]8;;$searchUrl$($script:e)\$varName$($script:e)]8;;$($script:e)\"
-
+    foreach ($varNameKey in ($effectiveVars.Keys | Sort-Object)) {
+      $searchUrl = "vscode://search/search?query=$([System.Uri]::EscapeDataString($varNameKey))"
+      $hyperlinkedVarName = "$($script:e)]8;;$searchUrl$($script:e)\$varNameKey$($script:e)]8;;$($script:e)\"
       $definedInFilesDisplayString = ""
-      if ($varToDefiningFilesMap.ContainsKey($varName)) {
-        $relativePathsWithItemiser = @()
-        foreach ($filePath in $varToDefiningFilesMap[$varName]) {
-          $relativePathsWithItemiser += "  $(Get-RelativePath -Path $filePath -BasePath $PWD.Path)" # Removed itemiser, added indent
-        }
-        $definedInFilesDisplayString = $relativePathsWithItemiser -join [System.Environment]::NewLine
+      if ($varToDefiningFilesMap.ContainsKey($varNameKey)) {
+        $relativePaths = $varToDefiningFilesMap[$varNameKey] | ForEach-Object { "  $(Get-RelativePath -Path $_ -BasePath $PWD.Path)" }
+        $definedInFilesDisplayString = $relativePaths -join [System.Environment]::NewLine
       }
-
       $outputObjects += [PSCustomObject]@{
-        Name        = $hyperlinkedVarName
-        # Value       = $varValue # Removed Value column
-        'Defined In'= $definedInFilesDisplayString
+        Name         = $hyperlinkedVarName
+        'Defined In' = $definedInFilesDisplayString
       }
     }
-
     if ($outputObjects.Count -gt 0) {
       $outputObjects | Format-Table -AutoSize
     } else {
       Write-Host "No effective variables found in the active configuration." -ForegroundColor Yellow
     }
-    # Write-Host "--------------------------------------------------" -ForegroundColor Cyan
     return
   }
 
-  # --- Load Parameter Set Logic (existing logic) ---
+  # --- Load Parameter Set Logic (Default) ---
   Write-Debug "MODULE Import-DotEnv: Called with Path '$Path' (Load set). Current PWD: $($PWD.Path)"
   if ($PSCmdlet.ParameterSetName -eq 'Load' -and (-not $PSBoundParameters.ContainsKey('Path'))) {
     $Path = "."
-    Write-Debug "MODULE Import-DotEnv: Path not bound for 'Load' set, defaulted to '$Path'."
   }
   try {
     $resolvedPath = Convert-Path -Path $Path -ErrorAction Stop
-  }
-  catch {
+  } catch {
     $resolvedPath = $PWD.Path
     Write-Debug "MODULE Import-DotEnv: Path '$Path' resolved to PWD '$resolvedPath' due to error: $($_.Exception.Message)"
   }
 
   $currentEnvFiles = Get-EnvFilesUpstream -Directory $resolvedPath
-  # if ($null -eq $currentEnvFiles) { # Assuming Get-EnvFilesUpstream ALWAYS returns an array (even if empty)
-  #   Write-Debug "MODULE Import-DotEnv: Get-EnvFilesUpstream call resulted in null for '$resolvedPath'. This is unexpected. Defaulting to empty array."
-  #   $currentEnvFiles = @()
-  # }
   Write-Debug "MODULE Import-DotEnv: Resolved path '$resolvedPath'. Found $($currentEnvFiles.Count) .env files upstream: $($currentEnvFiles -join ', ')"
   Write-Debug "MODULE Import-DotEnv: Previous files count: $($script:previousEnvFiles.Count) ('$($script:previousEnvFiles -join ', ')'). Previous PWD: '$($script:previousWorkingDirectory)'"
 
-  # --- New: Build hashtables of previous and current env states ---
   $prevVars = Get-EnvVarsFromFiles -Files $script:previousEnvFiles -BasePath $script:previousWorkingDirectory
   $currVars = Get-EnvVarsFromFiles -Files $currentEnvFiles -BasePath $resolvedPath
 
-  # --- Unload Phase: Only unset variables that are in prevVars but not in currVars, or changed value ---
-  Write-Debug "MODULE Import-DotEnv (Unload Phase): Current trueOriginalEnvironmentVariables keys: $($script:trueOriginalEnvironmentVariables.Keys -join ', ')"
-  $varsToUnset = @()
-  foreach ($var in $prevVars.Keys) {
-    if (-not $currVars.ContainsKey($var) -or $currVars[$var] -ne $prevVars[$var]) {
-      $varsToUnset += $var
+  # --- Unload Phase: Unset variables that were in prevVars but not in currVars, or if their value changed ---
+  $varsToUnsetOrRestore = @()
+  foreach ($varNameKey in $prevVars.Keys) {
+    if (-not $currVars.ContainsKey($varNameKey) -or $currVars[$varNameKey].Value -ne $prevVars[$varNameKey].Value) {
+      $varsToUnsetOrRestore += $varNameKey
     }
   }
-  if ($varsToUnset.Count -gt 0) {
-    # Group variables to unset by their originating .env file
-    $varToFileMap = @{}
-    foreach ($file in $script:previousEnvFiles) {
-      if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { continue }
-      $lines = Get-Content -Path $file -Encoding UTF8 -ErrorAction SilentlyContinue
-      $lineNumber = 0
-      foreach ($line in $lines) {
-        $lineNumber++
-        if ($line -match '^[ \t]*#') { continue }
-        if ($line -match '^[ \t]*$') { continue }
-        if ($line -match '^([^=]+)=(.*)$') {
-          $varName = $Matches[1].Trim()
-          if ($varsToUnset -contains $varName) {
-            if (-not $varToFileMap.ContainsKey($file)) { $varToFileMap[$file] = @() }
-            $varToFileMap[$file] += $varName
+
+  if ($varsToUnsetOrRestore.Count -gt 0) {
+    $varsToUnsetByFileMap = @{}
+    foreach ($fileToScan in $script:previousEnvFiles) {
+      if (-not (Test-Path -LiteralPath $fileToScan -PathType Leaf)) { continue }
+      try {
+        $lines = [System.IO.File]::ReadLines($fileToScan)
+        foreach ($line in $lines) {
+          if ($line -match '^[ \t]*#') { continue }
+          if ($line -match '^[ \t]*$') { continue }
+          if ($line -match '^([^=]+)=(.*)$') {
+            $parsedVarName = $Matches[1].Trim()
+            if ($varsToUnsetOrRestore -contains $parsedVarName) {
+              if (-not $varsToUnsetByFileMap.ContainsKey($fileToScan)) { $varsToUnsetByFileMap[$fileToScan] = [System.Collections.Generic.List[string]]::new() }
+              if (-not $varsToUnsetByFileMap[$fileToScan].Contains($parsedVarName)) {
+                  $varsToUnsetByFileMap[$fileToScan].Add($parsedVarName)
+              }
+            }
           }
         }
+      } catch {
+        Write-Warning "Import-DotEnv (Unload Phase): Error reading file '$fileToScan'. Skipping. Error: $($_.Exception.Message)"
       }
     }
-    # Find any vars not associated with a file (e.g. removed from all .env files)
-    $varsWithFile = $varToFileMap.Values | ForEach-Object { $_ } | Sort-Object -Unique
-    $varsNoFile = $varsToUnset | Where-Object { $varsWithFile -notcontains $_ }
-    if ($varToFileMap.Count -gt 0) {
-      foreach ($file in $script:previousEnvFiles) {
-        if (-not $varToFileMap.ContainsKey($file)) { continue }
-        $varsForFile = $varToFileMap[$file]
-        if ($varsForFile.Count -eq 0) { continue } # Only print header if there are actions
-        $formattedPath = Format-EnvFilePath -Path $file -BasePath $PWD
+    $varsActuallyRestoredFromFile = $varsToUnsetByFileMap.Values | ForEach-Object { $_ } | Sort-Object -Unique
+    $varsToRestoreNoFileAssociation = $varsToUnsetOrRestore | Where-Object { $varsActuallyRestoredFromFile -notcontains $_ }
+
+    if ($varsToUnsetByFileMap.Count -gt 0) {
+      foreach ($fileKey in $varsToUnsetByFileMap.Keys) {
+        $varsForFile = $varsToUnsetByFileMap[$fileKey]
+        if ($varsForFile.Count -eq 0) { continue }
+        $formattedPath = Format-EnvFilePath -Path $fileKey -BasePath $PWD.Path
         Write-Host "$script:itemiserA Restoring .env file ${formattedPath}:" -ForegroundColor Yellow
-        foreach ($varName in $varsForFile) {
-          $originalValue = $script:trueOriginalEnvironmentVariables[$varName]
-          Write-Debug "MODULE Import-DotEnv (Unload Phase): For var '$varName' from file '$formattedPath', original value from trueOriginals is '$originalValue'."
+        foreach ($varNameToRestore in $varsForFile) {
+          $originalValue = $script:trueOriginalEnvironmentVariables[$varNameToRestore]
           if ($null -eq $originalValue) {
-            [Environment]::SetEnvironmentVariable($varName, $null, 'Process')
-            Remove-Item "Env:\$varName" -Force -ErrorAction SilentlyContinue
+            [Environment]::SetEnvironmentVariable($varNameToRestore, $null, 'Process'); Remove-Item "Env:\$varNameToRestore" -Force -ErrorAction SilentlyContinue
           } else {
-            [Environment]::SetEnvironmentVariable($varName, $originalValue)
+            [Environment]::SetEnvironmentVariable($varNameToRestore, $originalValue)
           }
-          $searchUrl = "vscode://search/search?query=$([System.Uri]::EscapeDataString($varName))"
-          $hyperlinkedVarName = "$script:e]8;;$searchUrl$script:e\$varName$script:e]8;;$script:e\"
+          $searchUrl = "vscode://search/search?query=$([System.Uri]::EscapeDataString($varNameToRestore))"
+          $hyperlinkedVarName = "$script:e]8;;$searchUrl$script:e\$varNameToRestore$script:e]8;;$script:e\"
           $restoredActionText = if ($null -eq $originalValue) { "Unset" } else { "Restored" }
-          Write-Host "  $script:itemiser $restoredActionText environment variable: " -NoNewline
-          Write-Host $hyperlinkedVarName -ForegroundColor Yellow
+          Write-Host "  $script:itemiser $restoredActionText environment variable: " -NoNewline; Write-Host $hyperlinkedVarName -ForegroundColor Yellow
         }
       }
     }
-    if ($varsNoFile.Count -gt 0) {
+    if ($varsToRestoreNoFileAssociation.Count -gt 0) {
       Write-Host "Restoring environment variables not associated with any .env file:" -ForegroundColor Yellow
-      foreach ($varName in $varsNoFile) {
-        $originalValue = $script:trueOriginalEnvironmentVariables[$varName]
-        Write-Debug "MODULE Import-DotEnv (Unload Phase): For var '$varName' (no file association), original value from trueOriginals is '$originalValue'."
+      foreach ($varNameToRestore in $varsToRestoreNoFileAssociation) {
+        $originalValue = $script:trueOriginalEnvironmentVariables[$varNameToRestore]
         if ($null -eq $originalValue) {
-          [Environment]::SetEnvironmentVariable($varName, $null, 'Process')
-          Remove-Item "Env:\$varName" -Force -ErrorAction SilentlyContinue
+          [Environment]::SetEnvironmentVariable($varNameToRestore, $null, 'Process'); Remove-Item "Env:\$varNameToRestore" -Force -ErrorAction SilentlyContinue
         } else {
-          [Environment]::SetEnvironmentVariable($varName, $originalValue)
+          [Environment]::SetEnvironmentVariable($varNameToRestore, $originalValue)
         }
-        $searchUrl = "vscode://search/search?query=$([System.Uri]::EscapeDataString($varName))"
-        $hyperlinkedVarName = "$script:e]8;;$searchUrl$script:e\$varName$script:e]8;;$script:e\"
+        $searchUrl = "vscode://search/search?query=$([System.Uri]::EscapeDataString($varNameToRestore))"
+        $hyperlinkedVarName = "$script:e]8;;$searchUrl$script:e\$varNameToRestore$script:e]8;;$script:e\"
         $restoredActionText = if ($null -eq $originalValue) { "Unset" } else { "Restored" }
-        Write-Host "  $script:itemiser $restoredActionText environment variable: " -NoNewline
-        Write-Host $hyperlinkedVarName -ForegroundColor Yellow
+        Write-Host "  $script:itemiser $restoredActionText environment variable: " -NoNewline; Write-Host $hyperlinkedVarName -ForegroundColor Yellow
       }
     }
   }
 
-  Write-Debug "MODULE Import-DotEnv (Load Phase - Start): Current trueOriginalEnvironmentVariables keys before capture: $($script:trueOriginalEnvironmentVariables.Keys -join ', ')"
-  # --- Load Phase: Ensure all variables in currVars are set to their correct value (even if previously shadowed) ---
+  # --- Load Phase ---
   if ($currentEnvFiles.Count -gt 0) {
-    # First, collect all variables that will be set by any .env file in this load cycle (regardless of diff)
-    $allVarsToSet = @{
-    }
-    $fileVarLineMap = @{
-    }
-    foreach ($file in $currentEnvFiles) {
-      if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { continue }
-      $lines = Get-Content -Path $file -Encoding UTF8 -ErrorAction SilentlyContinue
-      $lineNumber = 0
-      foreach ($line in $lines) {
-        $lineNumber++
-        if ($line -match '^[ \t]*#') { continue }
-        if ($line -match '^[ \t]*$') { continue }
-        if ($line -match '^([^=]+)=(.*)$') {
-          $varName = $Matches[1].Trim()
-          $allVarsToSet[$varName] = $true
-        }
-      }
-    }
-    # Capture original values for all variables to be set, only if not already stored
-    foreach ($varName in $allVarsToSet.Keys) {
-      if (-not $script:trueOriginalEnvironmentVariables.ContainsKey($varName)) {
-        $currentEnvValue = [Environment]::GetEnvironmentVariable($varName, 'Process')
-        # Distinguish between not set (null) and set to empty string ('')
-        if (-not (Test-Path "Env:\$varName")) {
-          Write-Debug "MODULE Import-DotEnv (Load Phase - Capture): Storing original for '$varName' as `$null (not set)."
-          $script:trueOriginalEnvironmentVariables[$varName] = $null
+    foreach ($varNameKey in $currVars.Keys) {
+      if (-not $script:trueOriginalEnvironmentVariables.ContainsKey($varNameKey)) {
+        $currentEnvValue = [Environment]::GetEnvironmentVariable($varNameKey, 'Process')
+        if (-not (Test-Path "Env:\$varNameKey")) {
+          $script:trueOriginalEnvironmentVariables[$varNameKey] = $null
         } else {
-          Write-Debug "MODULE Import-DotEnv (Load Phase - Capture): Storing original for '$varName' as '$currentEnvValue'."
-          $script:trueOriginalEnvironmentVariables[$varName] = $currentEnvValue
+          $script:trueOriginalEnvironmentVariables[$varNameKey] = $currentEnvValue
         }
       }
     }
-    Write-Debug "MODULE Import-DotEnv (Load Phase - End Capture): Current trueOriginalEnvironmentVariables keys after capture: $($script:trueOriginalEnvironmentVariables.Keys -join ', ')"
-    # Now, for every variable in currVars, ensure it is set to the correct value (even if previously shadowed)
-    foreach ($varName in $currVars.Keys) {
-      $desiredValue = $currVars[$varName]
-      $currentValue = [Environment]::GetEnvironmentVariable($varName, 'Process')
+
+    $varsToReportAsSetOrChanged = [System.Collections.Generic.List[hashtable]]::new()
+    foreach ($varNameKey in $currVars.Keys) {
+      $desiredVarInfo = $currVars[$varNameKey]
+      $desiredValue = $desiredVarInfo.Value
+      $currentValue = [Environment]::GetEnvironmentVariable($varNameKey, 'Process')
       if ($currentValue -ne $desiredValue) {
-        [Environment]::SetEnvironmentVariable($varName, $desiredValue)
+        [Environment]::SetEnvironmentVariable($varNameKey, $desiredValue)
+      }
+      $isNewToSession = (-not $prevVars.ContainsKey($varNameKey))
+      $hasValueChanged = $false
+      if (-not $isNewToSession -and $prevVars[$varNameKey].Value -ne $desiredValue) {
+          $hasValueChanged = $true
+      }
+      if ($isNewToSession -or $hasValueChanged) {
+        $varsToReportAsSetOrChanged.Add(@{
+            Name       = $varNameKey
+            Line       = $desiredVarInfo.Line
+            SourceFile = $desiredVarInfo.SourceFile
+        })
       }
     }
-    # Continue with the existing logic for output and per-file reporting
-    $alreadySet = @{
-    }
-    foreach ($file in $currentEnvFiles) {
-      if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { continue }
-      $lines = Get-Content -Path $file -Encoding UTF8 -ErrorAction SilentlyContinue
-      $lineNumber = 0
-      $varsToSet = @()
-      $varLineMap = @{
-      }
-      foreach ($line in $lines) {
-        $lineNumber++
-        if ($line -match '^[ \t]*#') { continue }
-        if ($line -match '^[ \t]*$') { continue }
-        if ($line -match '^([^=]+)=(.*)$') {
-          $varName = $Matches[1].Trim()
-          $varValue = $Matches[2].Trim()
-          if ($alreadySet.ContainsKey($varName)) { continue } # Only set once per load
-          if (-not $prevVars.ContainsKey($varName) -or $prevVars[$varName] -ne $varValue) {
-            $varsToSet += $varName
-            $varLineMap[$varName] = $lineNumber
-          }
-        }
-      }
-      if ($varsToSet.Count -gt 0) {
-        $formattedPath = Format-EnvFilePath -Path $file -BasePath $script:previousWorkingDirectory
+
+    if ($varsToReportAsSetOrChanged.Count -gt 0) {
+      $groupedBySourceFile = $varsToReportAsSetOrChanged | Group-Object -Property SourceFile
+      foreach ($fileGroup in $groupedBySourceFile) {
+        $sourceFilePath = $fileGroup.Name
+        $formattedPath = Format-EnvFilePath -Path $sourceFilePath -BasePath $resolvedPath
         Write-Host "$script:itemiserA Processing .env file ${formattedPath}:" -ForegroundColor Cyan
-        foreach ($varName in $varsToSet) {
-          $lineNumber = $varLineMap[$varName]
-          $varValue = $currVars[$varName]
-          $fileUrl = "vscode://file/${file}:${lineNumber}"
-          $hyperlink = "$script:e]8;;$fileUrl$script:e\$varName$script:e]8;;$script:e\"
+        foreach ($varDetail in $fileGroup.Group) {
+          $hyperlink = Format-VarHyperlink -VarName $varDetail.Name -FilePath $varDetail.SourceFile -LineNumber $varDetail.Line
           Write-Host "  $script:itemiser Setting environment variable: " -NoNewline
           Write-Host $hyperlink -ForegroundColor Green -NoNewline
-          Write-Host " (from line ${lineNumber})"
-          $alreadySet[$varName] = $true
+          Write-Host " (from line $($varDetail.Line))"
         }
       }
     }
@@ -565,198 +584,102 @@ function Invoke-ImportDotEnvSetLocationWrapper {
   )
 
   $slArgs = @{}
-
-  # Determine the parameter set used for the wrapper and add appropriate parameters
   if ($PSCmdlet.ParameterSetName -eq 'Path') {
-    # Add Path only if it was explicitly bound.
-    # Set-Location can be called with no arguments (goes to home) or with a path resolving to a PSDrive.
-    # If $Path was bound (even to $null or empty string from an expression), it should be in $PSBoundParameters.
-    if ($PSBoundParameters.ContainsKey('Path')) {
-      $slArgs.Path = $Path
-    }
-  }
-  elseif ($PSCmdlet.ParameterSetName -eq 'LiteralPath') {
-    # LiteralPath is mandatory in its set, so it will always be in $PSBoundParameters if this set is used.
+    if ($PSBoundParameters.ContainsKey('Path')) { $slArgs.Path = $Path }
+  } elseif ($PSCmdlet.ParameterSetName -eq 'LiteralPath') {
     $slArgs.LiteralPath = $LiteralPath
   }
+  if ($PSBoundParameters.ContainsKey('PassThru')) { $slArgs.PassThru = $PassThru }
+  if ($PSBoundParameters.ContainsKey('StackName')) { $slArgs.StackName = $StackName }
 
-  # Add optional parameters if they were bound
-  if ($PSBoundParameters.ContainsKey('PassThru')) {
-    $slArgs.PassThru = $PassThru # $PassThru is a switch, its value will be $true if present
-  }
-  if ($PSBoundParameters.ContainsKey('StackName')) {
-    $slArgs.StackName = $StackName
-  }
-
-  # Forward common parameters if they were used on the wrapper
   $CommonParameters = @('Verbose', 'Debug', 'ErrorAction', 'ErrorVariable', 'WarningAction', 'WarningVariable',
-    'OutBuffer', 'OutVariable', 'PipelineVariable', 'InformationAction', 'InformationVariable')
+    'OutBuffer', 'OutVariable', 'PipelineVariable', 'InformationAction', 'InformationVariable', 'WhatIf', 'Confirm')
   foreach ($commonParam in $CommonParameters) {
     if ($PSBoundParameters.ContainsKey($commonParam)) {
       $slArgs[$commonParam] = $PSBoundParameters[$commonParam]
     }
   }
-  # Handle SupportsShouldProcess common parameters
-  if ($PSBoundParameters.ContainsKey('WhatIf')) { $slArgs.WhatIf = $PSBoundParameters.WhatIf }
-  if ($PSBoundParameters.ContainsKey('Confirm')) { $slArgs.Confirm = $PSBoundParameters.Confirm }
 
-  # Pre-calculate the debug string to avoid complex expressions directly in Write-Debug
-  # Also, correctly iterate hashtable key-value pairs using GetEnumerator()
-  $debugArgsString = ($slArgs.GetEnumerator() | ForEach-Object { "$($_.Key): $($_.Value)" } | Sort-Object) -join '; '
-  Write-Debug "Invoke-ImportDotEnvSetLocationWrapper: Calling Microsoft.PowerShell.Management\Set-Location with args: $debugArgsString"
-  # Call the original Set-Location cmdlet
-  # Ensure we call the cmdlet from the Microsoft.PowerShell.Management module
-  # to avoid recursion if Set-Location is aliased to this wrapper.
   Microsoft.PowerShell.Management\Set-Location @slArgs
-
-  Import-DotEnv -Path $PWD.Path # And our logic
+  Import-DotEnv -Path $PWD.Path
 }
 
 # Helper function to create the scriptblock for cd/sl wrappers
 function New-SetLocationWrapperScriptBlock {
   param([string]$TargetFunctionFullName)
-
-  # This scriptblock defines a function that correctly captures Set-Location's parameters
-  # and forwards them to the target function (Invoke-ImportDotEnvSetLocationWrapper).
   return [scriptblock]::Create(@"
 [CmdletBinding(DefaultParameterSetName='Path', SupportsShouldProcess=`$true, ConfirmImpact='Medium')]
 param(
     [Parameter(ParameterSetName='Path', Position=0, ValueFromPipeline, ValueFromPipelineByPropertyName)]
     [string]`$Path,
-
     [Parameter(ParameterSetName='LiteralPath', Mandatory, ValueFromPipelineByPropertyName)]
     [Alias('PSPath')]
     [string]`$LiteralPath,
-
     [Parameter()]
     [switch]`$PassThru,
-
     [Parameter()]
     [string]`$StackName
 )
-& $TargetFunctionFullName @PSBoundParameters
+& `$TargetFunctionFullName @PSBoundParameters
 "@)
 }
 
 function Enable-ImportDotEnvCdIntegration {
   [CmdletBinding()]
   param()
-
-  $currentModuleForEnable = $MyInvocation.MyCommand.Module # Use a distinct variable name
+  $currentModuleForEnable = $MyInvocation.MyCommand.Module
   if (-not $currentModuleForEnable) {
-    Write-Warning "Enable-ImportDotEnvCdIntegration: CRITICAL - Module could not be determined via `$MyInvocation.MyCommand.Module."
-    Write-Error "Aborting Enable-ImportDotEnvCdIntegration: Module context not found." # More assertive stop
-    return
+    Write-Error "Enable-ImportDotEnvCdIntegration: Module context not found." -ErrorAction Stop
   }
-  Write-Debug "Enable-ImportDotEnvCdIntegration: Module '$($currentModuleForEnable.Name)' found. Checking ExportedCommands..."
-
   if (-not $currentModuleForEnable.ExportedCommands.ContainsKey('Invoke-ImportDotEnvSetLocationWrapper')) {
-    Write-Warning "Enable-ImportDotEnvCdIntegration: CRITICAL - 'Invoke-ImportDotEnvSetLocationWrapper' IS NOT in ExportedCommands of module '$($currentModuleForEnable.Name)'. Available: $($currentModuleForEnable.ExportedCommands.Keys -join ', ')"
-    Write-Error "Aborting Enable-ImportDotEnvCdIntegration: Required wrapper function 'Invoke-ImportDotEnvSetLocationWrapper' is not exported." # More assertive stop
-    return
+    Write-Error "Enable-ImportDotEnvCdIntegration: Required wrapper 'Invoke-ImportDotEnvSetLocationWrapper' is not exported." -ErrorAction Stop
   }
-  Write-Debug "Enable-ImportDotEnvCdIntegration: 'Invoke-ImportDotEnvSetLocationWrapper' IS in ExportedCommands."
 
   Write-Host "Enabling ImportDotEnv integration for 'Set-Location', 'cd', and 'sl' commands..." -ForegroundColor Yellow
-  Write-Host "These commands will now also trigger .env file processing." -ForegroundColor Yellow
-  Write-Host "To disable, run 'Disable-ImportDotEnvCdIntegration'." -ForegroundColor Yellow
-
-  # The target for the alias is the fully qualified name of our wrapper function
-  # We use $currentModuleForEnable.Name which we've already validated exists.
   $wrapperFunctionFullName = "$($currentModuleForEnable.Name)\Invoke-ImportDotEnvSetLocationWrapper"
-  Write-Debug "Enable-ImportDotEnvCdIntegration: Determined wrapper function full name: '$wrapperFunctionFullName'"
-
-  # --- Phase 1: Cleanup existing commands ---
-  Write-Debug "Enable-ImportDotEnvCdIntegration: Phase 1 - Cleanup"
   $existingSetLocation = Get-Command Set-Location -ErrorAction SilentlyContinue
   if ($existingSetLocation -and $existingSetLocation.CommandType -eq [System.Management.Automation.CommandTypes]::Alias) {
-    Write-Debug "Enable-ImportDotEnvCdIntegration: Removing existing Set-Location alias."
     if (Get-Alias -Name Set-Location -ErrorAction SilentlyContinue) {
       Remove-Item -Path Alias:\Set-Location -Force -ErrorAction SilentlyContinue
     }
   }
-
-  # --- Phase 2: Define new commands/aliases ---
-  Write-Debug "Enable-ImportDotEnvCdIntegration: Phase 2 - Definition"
-  Write-Debug "About to Set-Alias Set-Location. Value: '$wrapperFunctionFullName' (Type: $($wrapperFunctionFullName.GetType().Name))"
-
-  # Check if Get-Command can resolve the fully qualified name at this moment.
-  # This is a check for PowerShell's command resolution cache. Failure here is not necessarily fatal
-  # if the function is confirmed exported, as Set-Alias defers full resolution to invocation time.
-  $resolvedTargetCmd = Get-Command $wrapperFunctionFullName -ErrorAction SilentlyContinue
-  if (-not $resolvedTargetCmd) {
-    Write-Debug "Enable-ImportDotEnvCdIntegration: NOTE - Get-Command could not resolve '$wrapperFunctionFullName' at this exact moment. This can be a transient command cache issue. Alias will likely still work if function is exported."
-  }
-
-  Set-Alias -Name Set-Location -Value $wrapperFunctionFullName -Scope Global -Force -Option ReadOnly, AllScope
-
-  # Process .env files for the current directory immediately upon enabling
-  Write-Debug "Enable-ImportDotEnvCdIntegration: Processing .env for current directory: $($PWD.Path)"
+  Set-Alias -Name Set-Location -Value $wrapperFunctionFullName -Scope Global -Force -Option ReadOnly,AllScope
   Import-DotEnv -Path $PWD.Path
-
   Write-Host "ImportDotEnv 'Set-Location', 'cd', 'sl' integration enabled!" -ForegroundColor Green
 }
 
 function Disable-ImportDotEnvCdIntegration {
   [CmdletBinding()]
   param()
-
   Write-Host "Disabling ImportDotEnv integration for 'Set-Location', 'cd', and 'sl'..." -ForegroundColor Yellow
   $currentModuleName = $MyInvocation.MyCommand.Module.Name
   if (-not $currentModuleName) {
-    # This can happen if the function is dot-sourced or called in a way that $MyInvocation.MyCommand.Module is not populated.
-    # Fallback to a hardcoded name, or error out if strictness is required.
-    Write-Warning "Disable-ImportDotEnvCdIntegration: Could not determine current module name dynamically. Falling back to 'ImportDotEnv'."
-    $currentModuleName = "ImportDotEnv" # Fallback assumption
+    Write-Warning "Disable-ImportDotEnvCdIntegration: Could not determine module name. Assuming 'ImportDotEnv'."
+    $currentModuleName = "ImportDotEnv"
   }
   $wrapperFunctionFullName = "$currentModuleName\Invoke-ImportDotEnvSetLocationWrapper"
-  $proxiesRemoved = $false # Renamed for clarity
+  $proxiesRemoved = $false
 
-  # Phase 1: Remove our specific proxies if they exist
-  Write-Debug "Disable-ImportDotEnvCdIntegration: Phase 1 - Removing proxies."
-
-  # For Set-Location (was an alias to our wrapper)
-  $slCmdInfoForDisable = Get-Command "Set-Location" -ErrorAction SilentlyContinue
-  Write-Debug "Disable-ImportDotEnvCdIntegration: Checking Set-Location. Found: Type '$($slCmdInfoForDisable.CommandType)', Definition '$($slCmdInfoForDisable.Definition)'. Expected Wrapper: '$wrapperFunctionFullName'."
-  if ($slCmdInfoForDisable -and $slCmdInfoForDisable.CommandType -eq [System.Management.Automation.CommandTypes]::Alias -and $slCmdInfoForDisable.Definition -eq $wrapperFunctionFullName) {
+  $slCmdInfo = Get-Command "Set-Location" -ErrorAction SilentlyContinue
+  if ($slCmdInfo -and $slCmdInfo.CommandType -eq 'Alias' -and $slCmdInfo.Definition -eq $wrapperFunctionFullName) {
     Remove-Alias -Name "Set-Location" -Scope Global -Force -ErrorAction SilentlyContinue
-    Write-Debug " - 'Set-Location' (ImportDotEnv alias proxy) removed."
     $proxiesRemoved = $true
   }
 
-  # Phase 2: Ensure default states are robustly restored
-  Write-Debug "Disable-ImportDotEnvCdIntegration: Phase 2 - Ensuring default command states."
-
-  # Ensure Set-Location is the original cmdlet
-  # Remove any alias or function that might be obscuring the original cmdlet
-  Write-Debug "Disable-ImportDotEnvCdIntegration: Restoring Set-Location to original cmdlet."
   Remove-Alias -Name "Set-Location" -Scope Global -Force -ErrorAction SilentlyContinue
   Remove-Item "Function:\Global:Set-Location" -Force -ErrorAction SilentlyContinue
+
   $finalSetLocation = Get-Command "Set-Location" -ErrorAction SilentlyContinue
-  if ($null -eq $finalSetLocation) {
-    Write-Warning " - CRITICAL: 'Set-Location' command is missing after attempting to restore defaults."
-  }
-  elseif ($finalSetLocation.Source -ne "Microsoft.PowerShell.Management" -or $finalSetLocation.CommandType -ne [System.Management.Automation.CommandTypes]::Cmdlet) {
-    Write-Warning " - 'Set-Location' may not be correctly restored. Expected Cmdlet from Microsoft.PowerShell.Management. Found Type: $($finalSetLocation.CommandType), Source: $($finalSetLocation.Source)."
-  }
-  else {
-    Write-Debug " - 'Set-Location' confirmed as original cmdlet."
+  if ($null -eq $finalSetLocation -or $finalSetLocation.Source -ne "Microsoft.PowerShell.Management" -or $finalSetLocation.CommandType -ne 'Cmdlet') {
+    Write-Warning "Disable-ImportDotEnvCdIntegration: 'Set-Location' may not be correctly restored to the original cmdlet."
   }
 
-  # By design now, Disable-ImportDotEnvCdIntegration does not unload variables.
-  # It only removes the command hooks.
-  # The module's state ($script:originalEnvironmentVariables, $script:previousEnvFiles, etc.)
-  # remains as it was, so a subsequent Import-DotEnv call will behave correctly
-  # based on that last known state.
-
-  # Final message
   if ($proxiesRemoved) {
     Write-Host "ImportDotEnv 'Set-Location' integration disabled, default command behavior restored." -ForegroundColor Magenta
-  }
-  else {
+  } else {
     Write-Host "ImportDotEnv 'Set-Location' integration was not active or already disabled." -ForegroundColor Magenta
   }
-  Write-Host "Active .env variables (if any) remain loaded. Use 'Import-DotEnv -Unload' to unload them, or 'Import-DotEnv -Path <new_path>' to change." -ForegroundColor Magenta
+  Write-Host "Active .env variables (if any) remain loaded. Use 'Import-DotEnv -Unload' to unload them." -ForegroundColor Magenta
 }
 
 Export-ModuleMember -Function Import-DotEnv,
