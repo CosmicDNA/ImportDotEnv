@@ -457,30 +457,25 @@ InModuleScope 'ImportDotEnv' {
                 } else {
                     [Environment]::SetEnvironmentVariable("TEST_VAR_A", $initialTestVarA)
                 }
-                Write-Host "TEST SCRIPT (First Test - DIAGNOSTIC): TEST_VAR_A initial state for test. Value: '$([Environment]::GetEnvironmentVariable("TEST_VAR_A"))', Test-Path: $(Test-Path Env:\TEST_VAR_A)" -ForegroundColor Green
 
                 $trueOriginalsBeforeDirA = $script:ImportDotEnvModule.SessionState.PSVariable.GetValue('trueOriginalEnvironmentVariables')
-                Write-Host "TEST SCRIPT (First Test - DIAGNOSTIC): Before DirA load, trueOriginalEnvironmentVariables count: $($trueOriginalsBeforeDirA.Count). Keys: $($trueOriginalsBeforeDirA.Keys -join ', ')" -ForegroundColor Cyan
-                Write-Host "TEST SCRIPT (First Test - DIAGNOSTIC): Before DirA load, value of TEST_VAR_A in trueOriginals: '$($trueOriginalsBeforeDirA['TEST_VAR_A'])'" -ForegroundColor Cyan
                 # Explicitly ensure TEST_VAR_A is null right before the Set-Location that will capture its original state
                 [Environment]::SetEnvironmentVariable("TEST_VAR_A", $null)
                 if(Test-Path Env:\TEST_VAR_A) { Remove-Item Env:\TEST_VAR_A -Force -ErrorAction SilentlyContinue }
-                Write-Host "TEST SCRIPT (First Test - DIAGNOSTIC): TEST_VAR_A re-confirmed null before DirA load. Value: '$([Environment]::GetEnvironmentVariable("TEST_VAR_A"))', Test-Path: $(Test-Path Env:\TEST_VAR_A)" -ForegroundColor Yellow
 
                 Set-Location $script:DirA.FullName
                 [Environment]::GetEnvironmentVariable("TEST_VAR_A") | Should -Be "valA"
-                Write-Host "TEST SCRIPT (First Test - DIAGNOSTIC): TEST_VAR_A after loading DirA is '$([Environment]::GetEnvironmentVariable("TEST_VAR_A"))'" -ForegroundColor Green
 
                 $trueOriginalsAfterDirA = $script:ImportDotEnvModule.SessionState.PSVariable.GetValue('trueOriginalEnvironmentVariables')
-                Write-Host "TEST SCRIPT (First Test - DIAGNOSTIC): After DirA load, trueOriginalEnvironmentVariables count: $($trueOriginalsAfterDirA.Count). Keys: $($trueOriginalsAfterDirA.Keys -join ', ')" -ForegroundColor Cyan
-                Write-Host "TEST SCRIPT (First Test - DIAGNOSTIC): After DirA load, value of TEST_VAR_A in trueOriginals: '$($trueOriginalsAfterDirA['TEST_VAR_A'])'" -ForegroundColor Cyan
 
                 Set-Location $script:TestRoot # Go to TestRoot, which might have its own or parent .env via mock
 
                 $actualValue = [Environment]::GetEnvironmentVariable("TEST_VAR_A")
                 $existsInPSDrive = Test-Path "Env:\TEST_VAR_A"
                 $trueOriginalsAtAssert = $script:ImportDotEnvModule.SessionState.PSVariable.GetValue('trueOriginalEnvironmentVariables')
-                Write-Host "TEST SCRIPT (First Test - DIAGNOSTIC): At assertion, value of TEST_VAR_A in trueOriginals: '$($trueOriginalsAtAssert['TEST_VAR_A'])'" -ForegroundColor Red
+
+                # Only emit essential debug info now that all tests are passing
+                Write-Debug "At assertion, value of TEST_VAR_A in trueOriginals: '$($trueOriginalsAtAssert['TEST_VAR_A'])'"
 
                 if ($null -eq $initialTestVarA) {
                     $actualValue | Should -BeNullOrEmpty

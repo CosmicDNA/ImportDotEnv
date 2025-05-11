@@ -181,12 +181,6 @@ function Import-DotEnv {
           # Always attempt to remove from Env: drive at least once
           # NOTE: Never pass -Scope to Remove-Item for Env: drive! It is not supported and will throw.
           Remove-Item "Env:\$varName" -Force -ErrorAction SilentlyContinue
-          $retryCount = 0
-          while ($retryCount -lt 3 -and (Test-Path "Env:\$varName")) {
-            Remove-Item "Env:\$varName" -Force -ErrorAction SilentlyContinue
-            $retryCount++
-            Start-Sleep -Milliseconds 100
-          }
           $existsAfter = Test-Path "Env:\$varName"
           $dotNetValAfter = [Environment]::GetEnvironmentVariable($varName, 'Process')
           Write-Debug "MODULE Import-DotEnv (Unload): Final removal status for $varName - Exists in Env: $existsAfter, .NET value: '$dotNetValAfter'"
@@ -344,10 +338,10 @@ function Import-DotEnv {
             [Environment]::SetEnvironmentVariable($varName, $null, 'Process')
             Remove-Item "Env:\$varName" -Force -ErrorAction SilentlyContinue
             $retryCount = 0
-            while ($retryCount -lt 3 -and (Test-Path "Env:\$varName")) {
+            while ($retryCount -lt 2 -and (Test-Path "Env:\$varName")) {
               Remove-Item "Env:\$varName" -Force -ErrorAction SilentlyContinue
               $retryCount++
-              Start-Sleep -Milliseconds 100
+              # Removed Start-Sleep for performance
             }
           } else {
             [Environment]::SetEnvironmentVariable($varName, $originalValue)
@@ -369,10 +363,10 @@ function Import-DotEnv {
           [Environment]::SetEnvironmentVariable($varName, $null, 'Process')
           Remove-Item "Env:\$varName" -Force -ErrorAction SilentlyContinue
           $retryCount = 0
-          while ($retryCount -lt 3 -and (Test-Path "Env:\$varName")) {
+          while ($retryCount -lt 2 -and (Test-Path "Env:\$varName")) {
             Remove-Item "Env:\$varName" -Force -ErrorAction SilentlyContinue
             $retryCount++
-            Start-Sleep -Milliseconds 100
+            # Removed Start-Sleep for performance
           }
         } else {
           [Environment]::SetEnvironmentVariable($varName, $originalValue)
@@ -444,8 +438,9 @@ function Import-DotEnv {
     foreach ($varName in $allVarsToSet.Keys) {
       if (-not $script:trueOriginalEnvironmentVariables.ContainsKey($varName)) {
         $currentEnvValue = [Environment]::GetEnvironmentVariable($varName, 'Process')
-        if ($null -eq $currentEnvValue -and -not (Test-Path "Env:\$varName")) {
-          Write-Debug "MODULE Import-DotEnv (Load Phase - Capture): Storing original for '$varName' as `$null."
+        # Distinguish between not set (null) and set to empty string ('')
+        if (-not (Test-Path "Env:\$varName")) {
+          Write-Debug "MODULE Import-DotEnv (Load Phase - Capture): Storing original for '$varName' as `$null (not set)."
           $script:trueOriginalEnvironmentVariables[$varName] = $null
         } else {
           Write-Debug "MODULE Import-DotEnv (Load Phase - Capture): Storing original for '$varName' as '$currentEnvValue'."
