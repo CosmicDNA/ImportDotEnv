@@ -130,18 +130,66 @@ function Parse-EnvFile {
     param([string]$FilePath)
     $vars = @{}
     if (-not (Test-Path -LiteralPath $FilePath -PathType Leaf)) { return $vars }
-    $lines = Get-Content -Path $FilePath -Encoding UTF8 -ErrorAction SilentlyContinue
+    try {
+        $lines = [System.IO.File]::ReadLines($FilePath)
+    } catch {
+        return $vars
+    }
     $lineNumber = 0
     foreach ($line in $lines) {
         $lineNumber++
-        if ($line -match '^[ \t]*#') { continue }
-        if ($line -match '^[ \t]*$') { continue }
-        if ($line -match '^([^=]+)=(.*)$') {
-            $varName = $Matches[1].Trim()
-            $varValue = $Matches[2].Trim()
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        $trimmed = $line.TrimStart()
+        if ($trimmed.StartsWith('#')) { continue }
+        $split = $line.Split('=', 2)
+        if ($split.Count -eq 2) {
+            $varName = $split[0].Trim()
+            $varValue = $split[1].Trim()
             $vars[$varName] = @{ Value = $varValue; Line = $lineNumber }
         }
     }
+    return $vars
+}
+
+function Get-EnvVarsFromFiles {
+    param([string[]]$Files, [string]$BasePath)
+    $syncRoot = New-Object object
+    $vars = @{}
+    if ($Files.Count -eq 1) {
+        # Fast path for single file
+        $parsed = Parse-EnvFile -FilePath $Files[0]
+        foreach ($varName in $parsed.Keys) {
+            $vars[$varName] = $parsed[$varName].Value
+        }
+        return $vars
+    }
+    $actions = @()
+    foreach ($file in $Files) {
+        $actions += {
+            param($f)
+            $parsed = Parse-EnvFile -FilePath $f
+            [System.Threading.Monitor]::Enter($syncRoot)
+            try {
+                foreach ($varName in $parsed.Keys) {
+                    $vars[$varName] = $parsed[$varName].Value
+                }
+            } finally {
+                [System.Threading.Monitor]::Exit($syncRoot)
+            }
+        }.GetNewClosure()
+    }
+    [System.Threading.Tasks.Parallel]::ForEach($Files, [Action[string]]{
+        param($f)
+        $parsed = Parse-EnvFile -FilePath $f
+        [System.Threading.Monitor]::Enter($syncRoot)
+        try {
+            foreach ($varName in $parsed.Keys) {
+                $vars[$varName] = $parsed[$varName].Value
+            }
+        } finally {
+            [System.Threading.Monitor]::Exit($syncRoot)
+        }
+    })
     return $vars
 }
 
