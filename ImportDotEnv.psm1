@@ -126,46 +126,6 @@ function Format-EnvFilePath {
   return $relativePath
 }
 
-# function Format-EnvFile {
-#   [CmdletBinding()]
-#   param(
-#     [Parameter(Mandatory)]
-#     [string]$EnvFile,
-#     [Parameter(Mandatory)]
-#     [string]$BasePath
-#   )
-
-#   # This function now only handles loading. Unloading/restoration is done in Import-DotEnv.
-#   if (-not (Test-Path -LiteralPath $EnvFile -PathType Leaf)) {
-#     return
-#   }
-
-#   $formattedPath = Format-EnvFilePath -Path $EnvFile -BasePath $BasePath
-#   Write-Host "$script:itemiserA Processing .env file ${formattedPath}:" -ForegroundColor Cyan
-
-#   $lineNumber = 0
-#   switch -Regex -File $EnvFile {
-#     '^\s*#.*' { $lineNumber++; continue } # Skip comments, count line
-#     '^\s*$' { $lineNumber++; continue }   # Skip empty lines, count line
-
-#     '^([^=]+)=(.*)$' {
-#       $lineNumber++
-#       $varName = $Matches[1].Trim()
-#       $varValue = $Matches[2].Trim()
-
-#       [Environment]::SetEnvironmentVariable($varName, $varValue)
-#       Write-Debug "MODULE Format-EnvFile: Set '$varName' to '$varValue'. Current value in env: '$([Environment]::GetEnvironmentVariable($varName))'"
-
-#       $fileUrl = "vscode://file/${EnvFile}:${lineNumber}"
-#       $hyperlink = "$script:e]8;;$fileUrl$script:e\$varName$script:e]8;;$script:e\"
-
-#       Write-Host "  $script:itemiser Setting environment variable: " -NoNewline
-#       Write-Host $hyperlink -ForegroundColor Green -NoNewline
-#       Write-Host " (from line ${lineNumber})"
-#     }
-#     default { $lineNumber++ } # Count other lines not matching the pattern
-# }
-
 # --- Helper function to get effective environment variables from a list of .env files ---
 function Get-EnvVarsFromFiles {
   param([string[]]$Files, [string]$BasePath) # BasePath is for context if needed, not directly used in this version
@@ -258,12 +218,6 @@ function Import-DotEnv {
       Write-Host "No .env configuration is currently active or managed by ImportDotEnv." -ForegroundColor Magenta
       return
     }
-
-    # Write-Host "Active .env Configuration" -ForegroundColor Cyan
-    # Write-Host "--------------------------------------------------" -ForegroundColor Cyan
-    # Write-Host "Loaded from base directory: $($script:previousWorkingDirectory)" -ForegroundColor Gray
-    # Write-Host "Paths below are relative to current directory: $($PWD.Path)" -ForegroundColor Gray
-    # Write-Host ""
 
     # Get the final effective values of variables as per the last load
     $effectiveVars = Get-EnvVarsFromFiles -Files $script:previousEnvFiles -BasePath $script:previousWorkingDirectory
@@ -381,8 +335,8 @@ function Import-DotEnv {
         if (-not $varToFileMap.ContainsKey($file)) { continue }
         $varsForFile = $varToFileMap[$file]
         if ($varsForFile.Count -eq 0) { continue } # Only print header if there are actions
-        $formattedPath = Format-EnvFilePath -Path $file -BasePath $script:previousWorkingDirectory
-        Write-Host "$script:itemiserA Restoring env vars listed on ${formattedPath} file:" -ForegroundColor Yellow
+        $formattedPath = Format-EnvFilePath -Path $file -BasePath $PWD
+        Write-Host "$script:itemiserA Restoring .env file ${formattedPath}:" -ForegroundColor Yellow
         foreach ($varName in $varsForFile) {
           $originalValue = $script:trueOriginalEnvironmentVariables[$varName]
           Write-Debug "MODULE Import-DotEnv (Unload Phase): For var '$varName' from file '$formattedPath', original value from trueOriginals is '$originalValue'."
@@ -407,7 +361,7 @@ function Import-DotEnv {
       }
     }
     if ($varsNoFile.Count -gt 0) {
-      Write-Host "Restoring variables not associated with any .env file:" -ForegroundColor Yellow
+      Write-Host "Restoring environment variables not associated with any .env file:" -ForegroundColor Yellow
       foreach ($varName in $varsNoFile) {
         $originalValue = $script:trueOriginalEnvironmentVariables[$varName]
         Write-Debug "MODULE Import-DotEnv (Unload Phase): For var '$varName' (no file association), original value from trueOriginals is '$originalValue'."
@@ -534,7 +488,7 @@ function Import-DotEnv {
       }
       if ($varsToSet.Count -gt 0) {
         $formattedPath = Format-EnvFilePath -Path $file -BasePath $script:previousWorkingDirectory
-        Write-Host "Processing .env file ${formattedPath}:" -ForegroundColor Cyan
+        Write-Host "$script:itemiserA Processing .env file ${formattedPath}:" -ForegroundColor Cyan
         foreach ($varName in $varsToSet) {
           $lineNumber = $varLineMap[$varName]
           $varValue = $currVars[$varName]
