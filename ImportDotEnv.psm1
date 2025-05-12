@@ -496,8 +496,13 @@ For `Set-Location` integration, use `Enable-ImportDotEnvCdIntegration` and `Disa
       $desiredVarInfo = $currVars[$varNameKey]
       $desiredValue = $desiredVarInfo.Value
       $currentValue = [Environment]::GetEnvironmentVariable($varNameKey, 'Process')
+      # Fix: Correctly set empty string as value, not as $null (which unsets)
       if ($currentValue -ne $desiredValue) {
-        [Environment]::SetEnvironmentVariable($varNameKey, $desiredValue)
+        if ($desiredValue -eq $null) {
+          [Environment]::SetEnvironmentVariable($varNameKey, $null)
+        } else {
+          [Environment]::SetEnvironmentVariable($varNameKey, $desiredValue)
+        }
       }
       $isNewToSession = (-not $prevVars.ContainsKey($varNameKey))
       $hasValueChanged = $false
