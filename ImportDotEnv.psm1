@@ -685,12 +685,23 @@ function Restore-EnvVars {
       "$script:e]8;;$searchUrl$script:e\$VarName$script:e]8;;$script:e\"
     }
     Write-Host "  $script:itemiser $restoredActionText environment variable: " -NoNewline
-    Write-Host ($hyperlink ?? $VarName) -ForegroundColor Yellow
+
+    # Write-Host ($hyperlink -ne $null ? $hyperlink : $VarName) -ForegroundColor Yellow
+    $Output = if ($hyperlink -ne $null) { $hyperlink } else { $VarName }
+    Write-Host $Output -ForegroundColor Yellow
   }
 
   $restorationActions | Group-Object SourceFile | ForEach-Object {
     $fileKey = $_.Name
-    Write-Host ($fileKey ? "$script:itemiserA Restoring .env file $(Format-EnvFilePath -Path $fileKey -BasePath $BasePath):" : "Restoring environment variables not associated with any .env file:") -ForegroundColor Yellow
+
+    # Write-Host ($fileKey ? "$script:itemiserA Restoring .env file $(Format-EnvFilePath -Path $fileKey -BasePath $BasePath):" : "Restoring environment variables not associated with any .env file:") -ForegroundColor Yellow
+    $envMessage = if ($fileKey) {
+        "$script:itemiserA Restoring .env file $(Format-EnvFilePath -Path $fileKey -BasePath $BasePath):"
+    } else {
+        "Restoring environment variables not associated with any .env file:"
+    }
+    Write-Host $envMessage -ForegroundColor Yellow
+
     $_.Group | ForEach-Object { Restore-EnvVar -VarName $_.VarName -TrueOriginalEnvironmentVariables $TrueOriginalEnvironmentVariables -SourceFile $_.SourceFile }
   }
 }
