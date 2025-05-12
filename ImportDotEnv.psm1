@@ -491,7 +491,7 @@ For `Set-Location` integration, use `Enable-ImportDotEnvCdIntegration` and `Disa
       }
     }
 
-    $varsToReportAsSetOrChanged = [System.Collections.Generic.List[hashtable]]::new()
+    $varsToReportAsSetOrChanged = [System.Collections.Generic.List[PSCustomObject]]::new() # Changed to PSCustomObject
     foreach ($varNameKey in $currVars.Keys) {
       $desiredVarInfo = $currVars[$varNameKey]
       $desiredValue = $desiredVarInfo.Value
@@ -509,8 +509,13 @@ For `Set-Location` integration, use `Enable-ImportDotEnvCdIntegration` and `Disa
       if (-not $isNewToSession -and $prevVars[$varNameKey].Value -ne $desiredValue) {
           $hasValueChanged = $true
       }
+      Write-Verbose "Var: '$varNameKey', IsNew: $isNewToSession, HasChanged: $hasValueChanged"
+      if (-not $isNewToSession) {
+        Write-Verbose "  PrevValue: '$($prevVars[$varNameKey].Value)', DesiredValue: '$desiredValue'"
+      }
+
       if ($isNewToSession -or $hasValueChanged) {
-        $varsToReportAsSetOrChanged.Add(@{
+        $varsToReportAsSetOrChanged.Add([PSCustomObject]@{ # Changed to PSCustomObject
             Name       = $varNameKey
             Line       = $desiredVarInfo.Line
             SourceFile = $desiredVarInfo.SourceFile
@@ -521,8 +526,16 @@ For `Set-Location` integration, use `Enable-ImportDotEnvCdIntegration` and `Disa
     if ($varsToReportAsSetOrChanged.Count -gt 0) {
       $groupedBySourceFile = $varsToReportAsSetOrChanged | Group-Object -Property SourceFile
       foreach ($fileGroup in $groupedBySourceFile) {
-        $sourceFilePath = $fileGroup.Name
-        $formattedPath = Format-EnvFilePath -Path $sourceFilePath -BasePath $resolvedPath
+        $sourceFilePath = $fileGroup.Name # This is "" in PS5.1 if SourceFile was $null, and $null in PS7+
+
+        # If SourceFile was $null (or missing), its group name might be $null or ""
+        # Skip processing for such groups as they don't represent a valid file path.
+        if ([string]::IsNullOrEmpty($sourceFilePath)) {
+          Write-Debug "Skipping report for variables with no valid SourceFile (group name was '$sourceFilePath')."
+          continue
+        }
+
+        $formattedPath = Format-EnvFilePath -Path $sourceFilePath -BasePath $resolvedPath # Now $sourceFilePath should be a valid path
         Write-Host "$script:itemiserA Processing .env file ${formattedPath}:" -ForegroundColor Cyan
         foreach ($varDetail in $fileGroup.Group) {
           $hyperlink = Format-VarHyperlink -VarName $varDetail.Name -FilePath $varDetail.SourceFile -LineNumber $varDetail.Line
