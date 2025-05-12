@@ -11,6 +11,8 @@ $script:previousWorkingDirectory = $PWD.Path
 $script:e = [char]27
 $script:itemiserA = [char]0x2022
 $script:itemiser = [char]0x21B3
+$script:boldOn = "$($script:e)[1m"
+$script:boldOff = "$($script:e)[0m" # Resets all attributes (color, bold, underline etc.)
 
 # $DebugPreference = 'Continue'
 
@@ -429,15 +431,76 @@ For `Set-Location` integration, use `Enable-ImportDotEnvCdIntegration` and `Disa
     $varToFiles = Get-VarToFilesMap $script:previousEnvFiles
     $outputObjects = $effectiveVars.Keys | Sort-Object | ForEach-Object {
       $var = $_
-      $files = $varToFiles[$var]
-      $hyperlink = Format-VarHyperlink -VarName $var -FilePath $files[0] -LineNumber 1
+      $varPlainName = $var # Store plain name for calculations
+      $effectiveVarDetail = $effectiveVars[$var] # Get details of the effective variable (SourceFile, Line)
+      $hyperlinkedName = Format-VarHyperlink -VarName $varPlainName -FilePath $effectiveVarDetail.SourceFile -LineNumber $effectiveVarDetail.Line
+
+      # For 'Defined In', list all files where the variable name appears
+      $definingFilesPaths = $varToFiles[$var] # This is an array of file paths from Get-VarToFilesMap
+      $definedInDisplay = ($definingFilesPaths | ForEach-Object { "  $(Get-RelativePath -Path $_ -BasePath $PWD.Path)" }) -join [Environment]::NewLine
+
       [PSCustomObject]@{
-        Name = $hyperlink
-        'Defined In' = ($files | ForEach-Object { "  $(Get-RelativePath -Path $_ -BasePath $PWD.Path)" }) -join [Environment]::NewLine
+        NameForOutput    = $hyperlinkedName  # Always the hyperlinked version
+        NamePlainForCalc = $varPlainName     # Always the plain version, for calculations
+        'Defined In'     = $definedInDisplay
       }
     }
     if ($outputObjects) {
-      $outputObjects | Format-Table -AutoSize
+      if ($PSVersionTable.PSVersion.Major -ge 7) {
+        # For PS7+, use NameForOutput (which has hyperlink), Format-Table handles ANSI well.
+        # Ensure the column header is "Name".
+        $outputObjects | Format-Table -Property @{Expression={$_.NameForOutput}; Label="Name"}, 'Defined In' -AutoSize
+      } else {
+        # PS5.1: Manual formatting to try and preserve hyperlinks while maintaining table structure.
+        # This works best in terminals that understand ANSI hyperlinks (like Windows Terminal running PS5.1).
+        # In older conhost.exe, ANSI codes might print literally.
+        $maxPlainNameLength = 0
+        $nameLengths = $outputObjects | ForEach-Object { $_.NamePlainForCalc.Length }
+        if ($nameLengths) {
+            $maxPlainNameLength = ($nameLengths | Measure-Object -Maximum).Maximum
+        }
+        # Ensure $nameColPaddedWidth is a clean integer for use in format strings.
+        $nameColPaddedWidth = [int]([Math]::Max("Name".Length, $maxPlainNameLength))
+
+        $nameHeaderTextPlain = "Name"
+        $definedInHeaderTextPlain = "Defined In"
+
+        $nameHeaderFormatted = "$($script:boldOn)${nameHeaderTextPlain}$($script:boldOff)"
+        $definedInHeaderFormatted = "$($script:boldOn)${definedInHeaderTextPlain}$($script:boldOff)"
+
+        Write-Host ""
+        # --- Print Header Titles ---
+        Write-Host -NoNewline $nameHeaderFormatted -ForegroundColor Green
+        # Calculate padding based on the plain text length of the "Name" header
+        $paddingForNameHeader = [Math]::Max(0, $nameColPaddedWidth - $nameHeaderTextPlain.Length)
+        Write-Host -NoNewline (" " * $paddingForNameHeader)
+        Write-Host -NoNewline "  " # Column separator
+        Write-Host $definedInHeaderFormatted -ForegroundColor Green
+
+        # --- Print Header Underlines ---
+        $nameUnderline = "-" * $nameColPaddedWidth # Underline spans the full calculated width of the first column
+        $definedInUnderline = "-" * $definedInHeaderTextPlain.Length # Underline matches the visible text of "Defined In"
+        Write-Host -NoNewline $nameUnderline -ForegroundColor Green
+        Write-Host -NoNewline "  " # Column separator
+        Write-Host $definedInUnderline -ForegroundColor Green
+
+        foreach ($obj in $outputObjects) {
+            $nameToPrint = $obj.NameForOutput # This is the hyperlink string
+            $plainNameActualLength = $obj.NamePlainForCalc.Length # Calculate actual length of the plain name
+            $definedInLines = $obj.'Defined In' -split [Environment]::NewLine
+
+            Write-Host -NoNewline $nameToPrint
+            $spacesNeededAfterName = [Math]::Max(0, $nameColPaddedWidth - $plainNameActualLength) # Use calculated plain name length
+            Write-Host -NoNewline (" " * $spacesNeededAfterName)
+            Write-Host -NoNewline "  " # Column separator
+            Write-Host $definedInLines[0] # First line of "Defined In"
+            # Subsequent lines of "Defined In", correctly indented
+            for ($j = 1; $j -lt $definedInLines.Length; $j++) {
+                Write-Host (" " * ($nameColPaddedWidth + 2)) $definedInLines[$j] # Indent under "Defined In"
+            }
+        }
+        Write-Host ""
+      }
     } else {
       Write-Host "No effective variables found in the active configuration." -ForegroundColor Yellow
     }
@@ -535,7 +598,7 @@ For `Set-Location` integration, use `Enable-ImportDotEnvCdIntegration` and `Disa
           continue
         }
 
-        $formattedPath = Format-EnvFilePath -Path $sourceFilePath -BasePath $resolvedPath # Now $sourceFilePath should be a valid path
+        $formattedPath = Format-EnvFilePath -Path $sourceFilePath -BasePath $script:previousWorkingDirectory # Now $sourceFilePath should be a valid path
         Write-Host "$script:itemiserA Processing .env file ${formattedPath}:" -ForegroundColor Cyan
         foreach ($varDetail in $fileGroup.Group) {
           $hyperlink = Format-VarHyperlink -VarName $varDetail.Name -FilePath $varDetail.SourceFile -LineNumber $varDetail.Line
