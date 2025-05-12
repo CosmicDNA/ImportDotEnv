@@ -51,6 +51,7 @@ function Get-RelativePath {
   }
 }
 
+# Cannot be local as this is mocked in Import-DotEnv tests
 function Get-EnvFilesUpstream {
   [CmdletBinding()]
   param([string]$Directory = ".")
@@ -106,48 +107,6 @@ function Format-EnvFilePath {
   return $relativePath
 }
 
-function Parse-EnvFile {
-    param([string]$FilePath)
-    $vars = @{}
-    if (-not ([System.IO.File]::Exists($FilePath))) {
-        Write-Debug "Parse-EnvFile: File '$FilePath' does not exist."
-        return $vars
-    }
-    try {
-        $lines = [System.IO.File]::ReadLines($FilePath)
-    } catch {
-        Write-Warning "Parse-EnvFile: Error reading file '$FilePath'. Error: $($_.Exception.Message)"
-        return $vars
-    }
-    $lineNumber = 0
-    foreach ($line in $lines) {
-        $lineNumber++
-        if ([string]::IsNullOrWhiteSpace($line)) { continue }
-        $trimmed = $line.TrimStart()
-        if ($trimmed.StartsWith('#')) { continue }
-        $split = $line.Split('=', 2)
-        if ($split.Count -eq 2) {
-            $varName = $split[0].Trim()
-            $varValue = $split[1].Trim()
-            $vars[$varName] = @{ Value = $varValue; Line = $lineNumber; SourceFile = $FilePath }
-        }
-    }
-    return $vars
-}
-
-# --- Helper: Parse a single .env line into [name, value] or $null ---
-function Parse-EnvLine {
-  param([string]$Line)
-  if ([string]::IsNullOrWhiteSpace($Line)) { return $null }
-  $trimmed = $Line.TrimStart()
-  if ($trimmed.StartsWith('#')) { return $null }
-  $split = $Line.Split('=', 2)
-  if ($split.Count -eq 2) {
-    return @($split[0].Trim(), $split[1].Trim())
-  }
-  return $null
-}
-
 function Format-VarHyperlink {
     param(
         [string]$VarName,
@@ -166,6 +125,35 @@ function Get-EnvVarsFromFiles {
         [string[]]$Files,
         [string]$BasePath # BasePath is for context, not directly used in var aggregation here
     )
+
+  function Parse-EnvFile {
+      param([string]$FilePath)
+      $vars = @{}
+      if (-not ([System.IO.File]::Exists($FilePath))) {
+          Write-Debug "Parse-EnvFile: File '$FilePath' does not exist."
+          return $vars
+      }
+      try {
+          $lines = [System.IO.File]::ReadLines($FilePath)
+      } catch {
+          Write-Warning "Parse-EnvFile: Error reading file '$FilePath'. Error: $($_.Exception.Message)"
+          return $vars
+      }
+      $lineNumber = 0
+      foreach ($line in $lines) {
+          $lineNumber++
+          if ([string]::IsNullOrWhiteSpace($line)) { continue }
+          $trimmed = $line.TrimStart()
+          if ($trimmed.StartsWith('#')) { continue }
+          $split = $line.Split('=', 2)
+          if ($split.Count -eq 2) {
+              $varName = $split[0].Trim()
+              $varValue = $split[1].Trim()
+              $vars[$varName] = @{ Value = $varValue; Line = $lineNumber; SourceFile = $FilePath }
+          }
+      }
+      return $vars
+  }
 
     if ($Files.Count -eq 0) {
         return @{}
@@ -317,6 +305,51 @@ function Import-DotEnv {
     [switch]$List
   )
 
+  # --- Helper: Parse a single .env line into [name, value] or $null ---
+  function Parse-EnvLine {
+    param([string]$Line)
+    if ([string]::IsNullOrWhiteSpace($Line)) { return $null }
+    $trimmed = $Line.TrimStart()
+    if ($trimmed.StartsWith('#')) { return $null }
+    $split = $Line.Split('=', 2)
+    if ($split.Count -eq 2) {
+      return @($split[0].Trim(), $split[1].Trim())
+    }
+    return $null
+  }
+
+  function Get-VarsToRestoreByFileMap {
+    param(
+      [string[]]$Files,
+      [string[]]$VarsToRestore
+    )
+
+    function Get-EnvVarNamesFromFile {
+      param([string]$FilePath)
+      if (-not (Test-Path -LiteralPath $FilePath -PathType Leaf)) { return @() }
+      try {
+        return [System.IO.File]::ReadLines($FilePath) | ForEach-Object {
+          $parsed = Parse-EnvLine $_
+          if ($null -ne $parsed) { $parsed[0] }
+        } | Where-Object { $_ }
+      } catch {
+        Write-Warning "Get-EnvVarNamesFromFile: Error reading file '$FilePath'. Skipping. Error: $($_.Exception.Message)"
+        return @()
+      }
+    }
+
+    $varsToUnsetByFileMap = @{}
+    foreach ($fileToScan in $Files) {
+      foreach ($parsedVarName in Get-EnvVarNamesFromFile -FilePath $fileToScan) {
+        if ($VarsToRestore -contains $parsedVarName) {
+          if (-not $varsToUnsetByFileMap.ContainsKey($fileToScan)) { $varsToUnsetByFileMap[$fileToScan] = [System.Collections.Generic.List[string]]::new() }
+          $varsToUnsetByFileMap[$fileToScan].Add($parsedVarName)
+        }
+      }
+    }
+    return $varsToUnsetByFileMap
+  }
+
   if ($PSCmdlet.ParameterSetName -eq 'Unload') {
     Write-Debug "MODULE Import-DotEnv: Called with -Unload switch."
     $varsFromLastLoad = Get-EnvVarsFromFiles -Files $script:previousEnvFiles -BasePath $script:previousWorkingDirectory
@@ -377,41 +410,33 @@ For `Set-Location` integration, use `Enable-ImportDotEnvCdIntegration` and `Disa
       return
     }
     $effectiveVars = Get-EnvVarsFromFiles -Files $script:previousEnvFiles -BasePath $script:previousWorkingDirectory
-    $varToDefiningFilesMap = @{}
-    foreach ($file in $script:previousEnvFiles) {
-      if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { continue }
-      try {
-        $lines = [System.IO.File]::ReadLines($file)
-        foreach ($line in $lines) {
-          if ($line -match '^[ \t]*#') { continue }
-          if ($line -match '^[ \t]*$') { continue }
-          if ($line -match '^([^=]+)=(.*)$') {
-            $varName = $Matches[1].Trim()
-            if (-not $varToDefiningFilesMap.ContainsKey($varName)) {
-              $varToDefiningFilesMap[$varName] = [System.Collections.Generic.List[string]]::new()
+    function Get-VarToFilesMap($files) {
+      $map = @{}
+      foreach ($file in $files) {
+        if (Test-Path -LiteralPath $file -PathType Leaf) {
+          foreach ($line in [System.IO.File]::ReadLines($file)) {
+            $parsed = Parse-EnvLine $line
+            if ($parsed) {
+              $var = $parsed[0]
+              if (-not $map[$var]) { $map[$var] = @() }
+              $map[$var] += $file
             }
-            $varToDefiningFilesMap[$varName].Add($file)
           }
         }
-      } catch {
-        Write-Warning "Import-DotEnv (-List): Error reading file '$file'. Skipping. Error: $($_.Exception.Message)"
+      }
+      $map
+    }
+    $varToFiles = Get-VarToFilesMap $script:previousEnvFiles
+    $outputObjects = $effectiveVars.Keys | Sort-Object | ForEach-Object {
+      $var = $_
+      $files = $varToFiles[$var]
+      $hyperlink = Format-VarHyperlink -VarName $var -FilePath $files[0] -LineNumber 1
+      [PSCustomObject]@{
+        Name = $hyperlink
+        'Defined In' = ($files | ForEach-Object { "  $(Get-RelativePath -Path $_ -BasePath $PWD.Path)" }) -join [Environment]::NewLine
       }
     }
-    $outputObjects = @()
-    foreach ($varNameKey in ($effectiveVars.Keys | Sort-Object)) {
-      $searchUrl = "vscode://search/search?query=$([System.Uri]::EscapeDataString($varNameKey))"
-      $hyperlinkedVarName = "$($script:e)]8;;$searchUrl$($script:e)\$varNameKey$($script:e)]8;;$($script:e)\"
-      $definedInFilesDisplayString = ""
-      if ($varToDefiningFilesMap.ContainsKey($varNameKey)) {
-        $relativePaths = $varToDefiningFilesMap[$varNameKey] | ForEach-Object { "  $(Get-RelativePath -Path $_ -BasePath $PWD.Path)" }
-        $definedInFilesDisplayString = $relativePaths -join [System.Environment]::NewLine
-      }
-      $outputObjects += [PSCustomObject]@{
-        Name         = $hyperlinkedVarName
-        'Defined In' = $definedInFilesDisplayString
-      }
-    }
-    if ($outputObjects.Count -gt 0) {
+    if ($outputObjects) {
       $outputObjects | Format-Table -AutoSize
     } else {
       Write-Host "No effective variables found in the active configuration." -ForegroundColor Yellow
@@ -544,26 +569,6 @@ function Invoke-ImportDotEnvSetLocationWrapper {
   Import-DotEnv -Path $PWD.Path
 }
 
-# Helper function to create the scriptblock for cd/sl wrappers
-function New-SetLocationWrapperScriptBlock {
-  param([string]$TargetFunctionFullName)
-  return [scriptblock]::Create(@"
-[CmdletBinding(DefaultParameterSetName='Path', SupportsShouldProcess=`$true, ConfirmImpact='Medium')]
-param(
-    [Parameter(ParameterSetName='Path', Position=0, ValueFromPipeline, ValueFromPipelineByPropertyName)]
-    [string]`$Path,
-    [Parameter(ParameterSetName='LiteralPath', Mandatory, ValueFromPipelineByPropertyName)]
-    [Alias('PSPath')]
-    [string]`$LiteralPath,
-    [Parameter()]
-    [switch]`$PassThru,
-    [Parameter()]
-    [string]`$StackName
-)
-& `$TargetFunctionFullName @PSBoundParameters
-"@)
-}
-
 function Enable-ImportDotEnvCdIntegration {
   [CmdletBinding()]
   param()
@@ -627,80 +632,6 @@ Enable-ImportDotEnvCdIntegration,
 Disable-ImportDotEnvCdIntegration,
 Invoke-ImportDotEnvSetLocationWrapper
 
-function Get-EnvVarNamesFromFile {
-  param([string]$FilePath)
-  if (-not (Test-Path -LiteralPath $FilePath -PathType Leaf)) { return @() }
-  try {
-    return [System.IO.File]::ReadLines($FilePath) | ForEach-Object {
-      $parsed = Parse-EnvLine $_
-      if ($null -ne $parsed) { $parsed[0] }
-    } | Where-Object { $_ }
-  } catch {
-    Write-Warning "Get-EnvVarNamesFromFile: Error reading file '$FilePath'. Skipping. Error: $($_.Exception.Message)"
-    return @()
-  }
-}
-
-function Get-VarsToRestoreByFileMap {
-  param(
-    [string[]]$Files,
-    [string[]]$VarsToRestore
-  )
-  $varsToUnsetByFileMap = @{}
-  foreach ($fileToScan in $Files) {
-    foreach ($parsedVarName in Get-EnvVarNamesFromFile -FilePath $fileToScan) {
-      if ($VarsToRestore -contains $parsedVarName) {
-        if (-not $varsToUnsetByFileMap.ContainsKey($fileToScan)) { $varsToUnsetByFileMap[$fileToScan] = [System.Collections.Generic.List[string]]::new() }
-        $varsToUnsetByFileMap[$fileToScan].Add($parsedVarName)
-      }
-    }
-  }
-  return $varsToUnsetByFileMap
-}
-
-function Set-OrUnset-EnvVar {
-  param(
-    [string]$Name,
-    [object]$Value
-  )
-  if ($null -eq $Value) {
-    [Environment]::SetEnvironmentVariable($Name, $null, 'Process')
-    Remove-Item "Env:\$Name" -Force -ErrorAction SilentlyContinue
-  } else {
-    [Environment]::SetEnvironmentVariable($Name, $Value)
-  }
-}
-
-function Write-EnvVarAction {
-  param(
-    [string]$ActionText,
-    [string]$VarName,
-    [string]$Color = 'Yellow',
-    [string]$Hyperlink = $null
-  )
-  Write-Host "  $script:itemiser $ActionText environment variable: " -NoNewline
-  Write-Host ($Hyperlink ?? $VarName) -ForegroundColor $Color
-}
-
-function Restore-EnvVar {
-  param(
-    [string]$VarName,
-    [hashtable]$TrueOriginalEnvironmentVariables,
-    [string]$SourceFile = $null
-  )
-  $originalValue = $TrueOriginalEnvironmentVariables[$VarName]
-  Set-OrUnset-EnvVar -Name $VarName -Value $originalValue
-  $restoredActionText = if ($null -eq $originalValue) { "Unset" } else { "Restored" }
-  $hyperlink = if ($SourceFile) {
-    Format-VarHyperlink -VarName $VarName -FilePath $SourceFile -LineNumber 1
-  } else {
-    # Fallback: search hyperlink
-    $searchUrl = "vscode://search/search?query=$([System.Uri]::EscapeDataString($VarName))"
-    "$script:e]8;;$searchUrl$script:e\$VarName$script:e]8;;$script:e\"
-  }
-  Write-EnvVarAction -ActionText $restoredActionText -VarName $VarName -Color 'Yellow' -Hyperlink $hyperlink
-}
-
 function Restore-EnvVars {
   param(
     [hashtable]$VarsToRestoreByFileMap = $null,
@@ -710,21 +641,51 @@ function Restore-EnvVars {
   )
   $restorationActions = @()
   if ($VarsToRestoreByFileMap) {
-    $VarsToRestoreByFileMap.GetEnumerator() | ForEach-Object {
-      $fileKey = $_.Key; $_.Value | ForEach-Object { $restorationActions += [PSCustomObject]@{ VarName = $_; SourceFile = $fileKey } }
+    foreach ($fileKey in $VarsToRestoreByFileMap.Keys) {
+      foreach ($var in $VarsToRestoreByFileMap[$fileKey]) {
+        $restorationActions += [PSCustomObject]@{ VarName = $var; SourceFile = $fileKey }
+      }
     }
   }
   if ($VarNames) {
-    $VarNames | ForEach-Object { $restorationActions += [PSCustomObject]@{ VarName = $_; SourceFile = $null } }
+    $restorationActions += $VarNames | ForEach-Object { [PSCustomObject]@{ VarName = $_; SourceFile = $null } }
   }
+
+  function Restore-EnvVar {
+    param(
+      [string]$VarName,
+      [hashtable]$TrueOriginalEnvironmentVariables,
+      [string]$SourceFile = $null
+    )
+    function Set-OrUnset-EnvVar {
+      param(
+        [string]$Name,
+        [object]$Value
+      )
+      if ($null -eq $Value) {
+        [Environment]::SetEnvironmentVariable($Name, $null, 'Process')
+        Remove-Item "Env:\$Name" -Force -ErrorAction SilentlyContinue
+      } else {
+        [Environment]::SetEnvironmentVariable($Name, $Value)
+      }
+    }
+
+    $originalValue = $TrueOriginalEnvironmentVariables[$VarName]
+    Set-OrUnset-EnvVar -Name $VarName -Value $originalValue
+    $restoredActionText = if ($null -eq $originalValue) { "Unset" } else { "Restored" }
+    $hyperlink = if ($SourceFile) {
+      Format-VarHyperlink -VarName $VarName -FilePath $SourceFile -LineNumber 1
+    } else {
+      $searchUrl = "vscode://search/search?query=$([System.Uri]::EscapeDataString($VarName))"
+      "$script:e]8;;$searchUrl$script:e\$VarName$script:e]8;;$script:e\"
+    }
+    Write-Host "  $script:itemiser $restoredActionText environment variable: " -NoNewline
+    Write-Host ($hyperlink ?? $VarName) -ForegroundColor Yellow
+  }
+
   $restorationActions | Group-Object SourceFile | ForEach-Object {
     $fileKey = $_.Name
     Write-Host ($fileKey ? "$script:itemiserA Restoring .env file $(Format-EnvFilePath -Path $fileKey -BasePath $BasePath):" : "Restoring environment variables not associated with any .env file:") -ForegroundColor Yellow
     $_.Group | ForEach-Object { Restore-EnvVar -VarName $_.VarName -TrueOriginalEnvironmentVariables $TrueOriginalEnvironmentVariables -SourceFile $_.SourceFile }
   }
-}
-
-function Show-EnvVarTable {
-  param([Parameter(Mandatory)][array]$OutputObjects)
-  $OutputObjects | Format-Table -AutoSize
 }

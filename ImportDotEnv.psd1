@@ -12,7 +12,7 @@
 RootModule = '.\ImportDotEnv.psm1'
 
 # Version number of this module.
-ModuleVersion = '1.0.0'
+ModuleVersion = '1.0.1-alpha'
 
 # Supported PSEditions
 # CompatiblePSEditions = @()
@@ -33,7 +33,7 @@ Copyright = '(c) Cosmic DNA. All rights reserved.'
 Description = 'Hierarchical .env file management for PowerShell with directory-aware loading/unloading'
 
 # Minimum version of the PowerShell engine required by this module
-PowerShellVersion = '4.0'
+PowerShellVersion = '5.1'
 
 # Name of the PowerShell host required by this module
 # PowerShellHostName = ''
@@ -121,7 +121,7 @@ PrivateData = @{
 '@
 
         # Prerelease string of this module
-        # Prerelease = ''
+        Prerelease = 'alpha'
 
         # Flag to indicate whether the module requires explicit user acceptance for install/update/save
         # RequireLicenseAcceptance = $false
