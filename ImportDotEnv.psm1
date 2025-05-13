@@ -58,15 +58,13 @@ function Get-EnvFilesUpstream {
   [CmdletBinding()]
   param([string]$Directory = ".")
 
-  $currentDirNormalized = ""
   try {
-    $currentDirNormalized = [System.IO.Path]::GetFullPath($Directory).TrimEnd([System.IO.Path]::DirectorySeparatorChar).ToLowerInvariant()
     $resolvedPath = Convert-Path -Path $Directory -ErrorAction Stop
   }
   catch {
     Write-Warning "Get-EnvFilesUpstream: Error resolving path '$Directory'. Error: $($_.Exception.Message). Defaulting to PWD."
     $resolvedPath = $PWD.Path
-    $currentDirNormalized = [System.IO.Path]::GetFullPath($resolvedPath).TrimEnd([System.IO.Path]::DirectorySeparatorChar).ToLowerInvariant()
+    # Removed unused variable assignment for $currentDirNormalized
   }
 
   $envFiles = [System.Collections.Generic.List[string]]::new()
@@ -128,7 +126,7 @@ function Get-EnvVarsFromFiles {
         [string]$BasePath # BasePath is for context, not directly used in var aggregation here
     )
 
-  function Parse-EnvFile {
+  function Read-EnvFile {
       param([string]$FilePath)
       $vars = @{}
       if (-not ([System.IO.File]::Exists($FilePath))) {
@@ -163,7 +161,7 @@ function Get-EnvVarsFromFiles {
 
     if ($Files.Count -eq 1) {
         # Fast path for a single file. Parse-EnvFile returns the rich structure.
-        return Parse-EnvFile -FilePath $Files[0]
+        return Read-EnvFile -FilePath $Files[0]
     }
 
     # For multiple files, use RunspacePool for parallel parsing.
@@ -249,7 +247,7 @@ Parse-EnvFileInRunspace -LocalFilePath $PathToParse
                         Write-Warning "Error parsing file '$($tracker.FilePath)' in parallel: $($err.ToString())"
                     }
                     $parsedResults[$tracker.OriginalIndex] = @{}
-                } elseif ($outputCollection -ne $null -and $outputCollection.Count -eq 1) {
+                } elseif ($null -ne $outputCollection -and $outputCollection.Count -eq 1) {
                     $singleOutput = $outputCollection[0]
                     if ($singleOutput -is [System.Collections.IDictionary]) { # Directly a hashtable
                         $parsedResults[$tracker.OriginalIndex] = $singleOutput
@@ -308,7 +306,7 @@ function Import-DotEnv {
   )
 
   # --- Helper: Parse a single .env line into [name, value] or $null ---
-  function Parse-EnvLine {
+  function Convert-EnvLine {
     param([string]$Line)
     if ([string]::IsNullOrWhiteSpace($Line)) { return $null }
     $trimmed = $Line.TrimStart()
@@ -331,7 +329,7 @@ function Import-DotEnv {
       if (-not (Test-Path -LiteralPath $FilePath -PathType Leaf)) { return @() }
       try {
         return [System.IO.File]::ReadLines($FilePath) | ForEach-Object {
-          $parsed = Parse-EnvLine $_
+          $parsed = Convert-EnvLine $_
           if ($null -ne $parsed) { $parsed[0] }
         } | Where-Object { $_ }
       } catch {
@@ -417,7 +415,7 @@ For `Set-Location` integration, use `Enable-ImportDotEnvCdIntegration` and `Disa
       foreach ($file in $files) {
         if (Test-Path -LiteralPath $file -PathType Leaf) {
           foreach ($line in [System.IO.File]::ReadLines($file)) {
-            $parsed = Parse-EnvLine $line
+            $parsed = Convert-EnvLine $line
             if ($parsed) {
               $var = $parsed[0]
               if (-not $map[$var]) { $map[$var] = @() }
@@ -561,7 +559,7 @@ For `Set-Location` integration, use `Enable-ImportDotEnvCdIntegration` and `Disa
       $currentValue = [Environment]::GetEnvironmentVariable($varNameKey, 'Process')
       # Fix: Correctly set empty string as value, not as $null (which unsets)
       if ($currentValue -ne $desiredValue) {
-        if ($desiredValue -eq $null) {
+        if ($null -eq $desiredValue) {
           [Environment]::SetEnvironmentVariable($varNameKey, $null)
         } else {
           [Environment]::SetEnvironmentVariable($varNameKey, $desiredValue)
@@ -688,11 +686,11 @@ function Disable-ImportDotEnvCdIntegration {
 
   $slCmdInfo = Get-Command "Set-Location" -ErrorAction SilentlyContinue
   if ($slCmdInfo -and $slCmdInfo.CommandType -eq 'Alias' -and $slCmdInfo.Definition -eq $wrapperFunctionFullName) {
-    Remove-Alias -Name "Set-Location" -Scope Global -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path Alias:\Set-Location -Force -ErrorAction SilentlyContinue
     $proxiesRemoved = $true
   }
 
-  Remove-Alias -Name "Set-Location" -Scope Global -Force -ErrorAction SilentlyContinue
+  Remove-Item -Path Alias:\Set-Location -Force -ErrorAction SilentlyContinue
   Remove-Item "Function:\Global:Set-Location" -Force -ErrorAction SilentlyContinue
 
   $finalSetLocation = Get-Command "Set-Location" -ErrorAction SilentlyContinue
@@ -763,7 +761,7 @@ function Restore-EnvVars {
     Write-Host "  $script:itemiser $restoredActionText environment variable: " -NoNewline
 
     # Write-Host ($hyperlink -ne $null ? $hyperlink : $VarName) -ForegroundColor Yellow
-    $Output = if ($hyperlink -ne $null) { $hyperlink } else { $VarName }
+    $Output = if ($null -ne $hyperlink) { $hyperlink } else { $VarName }
     Write-Host $Output -ForegroundColor Yellow
   }
 
