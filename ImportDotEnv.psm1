@@ -514,6 +514,7 @@ For `Set-Location` integration, use `Enable-ImportDotEnvCdIntegration` and `Disa
     $resolvedPath = Convert-Path -Path $Path -ErrorAction Stop
   } catch {
     $resolvedPath = $PWD.Path
+    Write-Warning "Import-DotEnv: The specified path '$Path' could not be resolved. Falling back to current directory: '$resolvedPath'. Error: $($_.Exception.Message)"
     Write-Debug "MODULE Import-DotEnv: Path '$Path' resolved to PWD '$resolvedPath' due to error: $($_.Exception.Message)"
   }
 
