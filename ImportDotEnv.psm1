@@ -14,7 +14,7 @@ $script:itemiser = [char]0x21B3
 $script:boldOn = "$($script:e)[1m"
 $script:boldOff = "$($script:e)[0m" # Resets all attributes (color, bold, underline etc.)
 
-# $DebugPreference = 'Continue'
+$DebugPreference = 'Continue'
 
 function Get-RelativePath {
   [CmdletBinding()]

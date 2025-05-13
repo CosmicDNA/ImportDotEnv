@@ -860,7 +860,7 @@ InModuleScope 'ImportDotEnv' {
         Describe 'Import-DotEnv -List switch' -Tag 'ListSwitch' {
             It 'lists active variables and their defining files when state is active' {
                 # Arrange: create a temp .env file
-                $tempDir = Join-Path $env:TEMP (New-Guid)
+                $tempDir = Join-Path $TestDrive (New-Guid)
                 New-Item -ItemType Directory -Path $tempDir | Out-Null
                 $envFile = Join-Path $tempDir '.env'
                 Set-Content -Path $envFile -Value @(
@@ -882,10 +882,38 @@ InModuleScope 'ImportDotEnv' {
                     $outputString | Should -Match 'BAZ'
                     $outputString | Should -Match '.env'
                 }
-
-                # Cleanup
-                Remove-Item -Path $tempDir -Recurse -Force
+                # No cleanup needed for $TestDrive
             }
         } # End of Describe "Import-DotEnv -List switch"
+
+        Describe 'Import-DotEnv -Unload switch' -Tag 'UnloadSwitch' {
+            It 'unloads variables and resets state after a load (in-process)' {
+                # Arrange: create a temp .env file and load it
+                $tempDir = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+                New-Item -ItemType Directory -Path $tempDir | Out-Null
+                $envFile = Join-Path $tempDir '.env'
+                $varName = 'UNLOAD_TEST_VAR'
+                Set-Content -Path $envFile -Value "$varName=unload_me"
+
+                InModuleScope ImportDotEnv {
+                    # Mock Get-EnvFilesUpstream to return our temp .env file
+                    Mock Get-EnvFilesUpstream { param($Directory) return @($envFile) } -ModuleName ImportDotEnv
+
+                    # Load the .env file
+                    Import-DotEnv -Path $tempDir
+                    [Environment]::GetEnvironmentVariable($varName) | Should -Be 'unload_me'
+                    $script:previousEnvFiles | Should -BeExactly @($envFile)
+                    $script:previousWorkingDirectory | Should -Be $tempDir
+                }
+
+                # Act: Unload in-process (outside InModuleScope to avoid parameter set confusion)
+                & { Import-DotEnv -Unload }
+
+                # Assert: variable is unset and state is reset
+                (Test-Path Env:\$varName) | Should -Be $false
+                (-not $script:previousEnvFiles) | Should -Be $true
+                $script:previousWorkingDirectory | Should -Be 'STATE_AFTER_EXPLICIT_UNLOAD'
+            }
+        } # End of Describe 'Import-DotEnv -Unload switch'
     } # End of Describe "Import-DotEnv Core and Integration Tests"
 } # End of InModuleScope
