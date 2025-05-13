@@ -856,5 +856,36 @@ InModuleScope 'ImportDotEnv' {
             #     { ImportDotEnv\Disable-ImportDotEnvCdIntegration } | Should -WriteHost -Message "ImportDotEnv 'Set-Location' integration was not active or already disabled."
             # }
         }
+
+        Describe 'Import-DotEnv -List switch' -Tag 'ListSwitch' {
+            It 'lists active variables and their defining files when state is active' {
+                # Arrange: create a temp .env file
+                $tempDir = Join-Path $env:TEMP (New-Guid)
+                New-Item -ItemType Directory -Path $tempDir | Out-Null
+                $envFile = Join-Path $tempDir '.env'
+                Set-Content -Path $envFile -Value @(
+                    'FOO=bar',
+                    'BAZ=qux'
+                )
+
+                InModuleScope ImportDotEnv {
+                    # Simulate active state
+                    $script:previousEnvFiles = @($envFile)
+                    $script:previousWorkingDirectory = $tempDir
+
+                    # Act: capture output
+                    $output = Import-DotEnv -List *>&1
+
+                    # Assert: output contains variable names and file
+                    $outputString = $output | Out-String
+                    $outputString | Should -Match 'FOO'
+                    $outputString | Should -Match 'BAZ'
+                    $outputString | Should -Match '.env'
+                }
+
+                # Cleanup
+                Remove-Item -Path $tempDir -Recurse -Force
+            }
+        } # End of Describe "Import-DotEnv -List switch"
     } # End of Describe "Import-DotEnv Core and Integration Tests"
 } # End of InModuleScope
