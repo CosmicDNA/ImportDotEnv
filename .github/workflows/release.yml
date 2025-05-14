@@ -45,6 +45,7 @@ jobs:
           $COVERAGE = & .\scripts\RunTests.ps1 -EnableCoverage
           # Update env var with the coverage information
           echo "COVERAGE=$COVERAGE" >> $env:GITHUB_ENV
+        shell: pwsh
 
       - name: Determine Tag Type and update TAG_TYPE
         id: tag_type

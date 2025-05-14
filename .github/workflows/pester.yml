@@ -24,3 +24,4 @@ jobs:
         run: |
           # Run Pester tests without coverage nor coverage report generation
           .\scripts\RunTests.ps1
+        shell: pwsh
