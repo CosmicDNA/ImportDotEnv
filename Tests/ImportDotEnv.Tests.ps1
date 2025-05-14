@@ -256,25 +256,47 @@ InModuleScope 'ImportDotEnv' {
                 $initialManualTestVar = [Environment]::GetEnvironmentVariable("MANUAL_TEST_VAR") # Capture initial state
                 $manualEnvFile = Join-Path $script:TestRoot ".env"
                 Set-Content -Path $manualEnvFile -Value "MANUAL_TEST_VAR=loaded_manual"
+                $ErrorActionPreferenceBackup = $ErrorActionPreference
+                $ErrorActionPreference = 'Stop' # Make sure errors in the try block are caught
+                $Error.Clear()
                 try {
                     Push-Location $script:TestRoot
+                    Write-Debug "Test 'loads variables...': PWD after Push-Location: $($PWD.Path)"
                     Mock Get-EnvFilesUpstream -MockWith $script:GetEnvFilesUpstreamMock -ModuleName ImportDotEnv
 
+                    Write-Debug "Test 'loads variables...': Calling Import-DotEnv for first load. Initial MANUAL_TEST_VAR: '$initialManualTestVar'"
                     Import-DotEnv -Path "." # Load .env from $script:TestRoot
+                    $currentManualTestVarValue = [Environment]::GetEnvironmentVariable("MANUAL_TEST_VAR")
+                    Write-Debug "Test 'loads variables...': MANUAL_TEST_VAR after first load: '$currentManualTestVarValue'"
                     [Environment]::GetEnvironmentVariable("MANUAL_TEST_VAR") | Should -Be "loaded_manual"
+                    Write-Debug "Test 'loads variables...': Assertion 1 passed."
+                    Write-Debug "Test 'loads variables...': Module's trueOriginals for MANUAL_TEST_VAR: '$($script:trueOriginalEnvironmentVariables['MANUAL_TEST_VAR'])'"
 
                     # Simulate moving out by calling Import-DotEnv for the parent
+                    Write-Debug "Test 'loads variables...': Calling Import-DotEnv for parent restore. PWD: $($PWD.Path)"
                     Import-DotEnv -Path $script:ParentDirOfTestRoot
+                    $restoredManualTestVarValue = [Environment]::GetEnvironmentVariable("MANUAL_TEST_VAR")
+                    Write-Debug "Test 'loads variables...': MANUAL_TEST_VAR after parent restore call: '$restoredManualTestVarValue'"
 
                     # Check if MANUAL_TEST_VAR was restored to its original value or unset if it didn't exist
                     if ($null -eq $initialManualTestVar) {
                         (Test-Path Env:\MANUAL_TEST_VAR) | Should -Be $false
+                        ([Environment]::GetEnvironmentVariable("MANUAL_TEST_VAR")) | Should -BeNullOrEmpty "because initial was null"
                     } else {
                         [Environment]::GetEnvironmentVariable("MANUAL_TEST_VAR") | Should -Be $initialManualTestVar
                     }
+                    Write-Debug "Test 'loads variables...': Assertion 2 passed."
                     Pop-Location
+                    Write-Debug "Test 'loads variables...': Pop-Location successful."
+                }
+                catch {
+                    Write-Error "Test 'loads variables...' FAILED with exception: $($_.ToString())"
+                    Write-Error "Exception StackTrace: $($_.ScriptStackTrace)"
+                    # Ensure Pester sees a failure
+                    throw "Test 'loads variables...' failed explicitly due to caught error."
                 }
                 finally {
+                    $ErrorActionPreference = $ErrorActionPreferenceBackup
                     if (Test-Path $manualEnvFile) { Remove-Item $manualEnvFile -Force -ErrorAction SilentlyContinue }
                     # Restore MANUAL_TEST_VAR to its absolute initial state
                     if ($null -eq $initialManualTestVar) { [Environment]::SetEnvironmentVariable("MANUAL_TEST_VAR", $null) } else { [Environment]::SetEnvironmentVariable("MANUAL_TEST_VAR", $initialManualTestVar) }
@@ -542,6 +564,8 @@ InModuleScope 'ImportDotEnv' {
                 [Environment]::SetEnvironmentVariable("TEST_EMPTY_VAR", $initialEmptyVar)
 
                 Set-Location $script:DirC.FullName
+
+                # When .env has VAR=, the value is an empty string. GetEnvironmentVariable should return "".
                 [Environment]::GetEnvironmentVariable("TEST_EMPTY_VAR") | Should -Be ""
 
                 Set-Location $script:TestRoot
