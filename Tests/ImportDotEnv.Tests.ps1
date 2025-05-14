@@ -36,16 +36,17 @@ InModuleScope 'ImportDotEnv' {
                 $Global:InitialEnvironment[$varName] = [Environment]::GetEnvironmentVariable($varName)
             }
 
-            # Create temporary directory structure for tests
-            $script:TestRoot = Join-Path $env:TEMP "ImportDotEnvPesterTests"
-            if (Test-Path $script:TestRoot) {
-                Write-Debug "BeforeAll: Removing existing TestRoot '$script:TestRoot'"
-                Remove-Item $script:TestRoot -Recurse -Force
-            }
+            # Create temporary directory structure for tests using $TestDrive
+            $script:TestRoot = Join-Path $TestDrive "ImportDotEnvPesterTests"
+            # Pester creates $TestDrive, so we only need to create our subdirectory if it doesn't exist (e.g., from a previous failed run if not cleaned)
+            # However, Pester should clean $TestDrive before each file, so this explicit removal is usually not needed.
+            # if (Test-Path $script:TestRoot) {
+            #     Write-Debug "BeforeAll: Removing existing TestRoot '$script:TestRoot' (should be handled by Pester)"
+            #     Remove-Item $script:TestRoot -Recurse -Force
+            # }
             New-Item -Path $script:TestRoot -ItemType Directory | Out-Null
 
-            # --- New: Create a parent directory with a .env file for cross-directory restoration test ---
-            $script:ParentDirOfTestRoot = Split-Path $script:TestRoot -Parent # e.g., C:\Users\dani_\AppData\Local\Temp
+            $script:ParentDirOfTestRoot = $TestDrive # The root of TestDrive will act as the parent for TestRoot
             $script:ParentEnvPath = Join-Path $script:ParentDirOfTestRoot ".env" # e.g., C:\Users\dani_\AppData\Local\Temp\.env
 
             $script:DirWithOwnEnv = New-Item -Path (Join-Path $script:TestRoot "DirWithOwnEnv") -ItemType Directory
@@ -141,9 +142,9 @@ InModuleScope 'ImportDotEnv' {
 
         AfterAll { # Runs once after all tests in this Describe block
             if ($script:TestRoot -and $PWD.Path.StartsWith($script:TestRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
-                $parentOfTestRoot = Split-Path $script:TestRoot -Parent
-                Write-Debug "AfterAll: Current PWD '$($PWD.Path)' is inside TestRoot. Changing location to '$parentOfTestRoot'."
-                Microsoft.PowerShell.Management\Set-Location $parentOfTestRoot # Use original SL
+                # $script:ParentDirOfTestRoot is $TestDrive itself.
+                Write-Debug "AfterAll: Current PWD '$($PWD.Path)' is inside TestRoot. Changing location to '$($script:ParentDirOfTestRoot)'."
+                Microsoft.PowerShell.Management\Set-Location $script:ParentDirOfTestRoot # Use original SL
             }
             # Only restore environment variables; do not manually remove any test files or directories. Pester will handle cleanup.
             Write-Debug "AfterAll: Restoring initial environment variables."
@@ -642,27 +643,12 @@ InModuleScope 'ImportDotEnv' {
 
         Describe 'Import-DotEnv -List switch' {
             BeforeAll {
+                $baseDirForListTest = Join-Path $TestDrive "ListSwitchTestDir"
                 function Invoke-ImportDotEnvListAndCaptureOutput {
                     param(
                         [switch]$MockPSVersion5
                     )
-                    # Create temp dir and .env file in $TestDrive
-                    $tempDir = Join-Path $TestDrive (New-Guid)
-                    New-Item -ItemType Directory -Path $tempDir | Out-Null
-                    $tempDir2 = Join-Path $tempDir "tempDir2"
-                    New-Item -ItemType Directory -Path $tempDir2 | Out-Null
 
-                    $envFile = Join-Path $tempDir '.env'
-                    Set-Content -Path $envFile -Value @(
-                        'FOO=bar',
-                        'BAZ=qux'
-                    )
-
-                    $envFile2 = Join-Path $tempDir2 '.env'
-                    Set-Content -Path $envFile2 -Value @(
-                        'FOO=override',
-                        'GEZ=whatever'
-                    )
                     if ($MockPSVersion5) {
                         $script:PSVersionTable = @{ PSVersion = [version]'5.1.0.0' }
                     }
@@ -675,6 +661,24 @@ InModuleScope 'ImportDotEnv' {
                     $outputString | Should -Match '\.env'
                 }
             }
+            BeforeEach {
+                New-Item -ItemType Directory -Path $baseDirForListTest | Out-Null
+                $tempDir2 = Join-Path $baseDirForListTest "ListSwitchSubDir" # Changed for clarity
+                New-Item -ItemType Directory -Path $tempDir2 | Out-Null
+
+                $envFile = Join-Path $baseDirForListTest '.env'
+                Set-Content -Path $envFile -Value @(
+                    'FOO=bar',
+                    'BAZ=qux'
+                )
+
+                $envFile2 = Join-Path $tempDir2 '.env'
+                Set-Content -Path $envFile2 -Value @(
+                    'FOO=override',
+                    'GEZ=whatever'
+                )
+            }
+
             It 'lists active variables and their defining files when state is active (PowerShell 7+)' -Tag "ListSwitch" {
                 Invoke-ImportDotEnvListAndCaptureOutput
 
@@ -682,6 +686,10 @@ InModuleScope 'ImportDotEnv' {
 
             It 'lists active variables in table format when PSVersion is 5 (Windows PowerShell)' -Tag "ListSwitch" {
                 Invoke-ImportDotEnvListAndCaptureOutput -MockPSVersion5
+            }
+
+            AfterEach {
+                Remove-Item -Path $baseDirForListTest -Recurse -Force
             }
         }
         It 'Import-DotEnv -List switch should report back correctly when no .env files are active' -Tag "focus" {
@@ -694,7 +702,7 @@ InModuleScope 'ImportDotEnv' {
         Describe 'Import-DotEnv -Unload switch' -Tag 'UnloadSwitch' {
             It 'unloads variables and resets state after a load (in-process)' {
                 # Arrange: create a temp .env file and load it
-                $tempDir = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+                $tempDir = Join-Path $TestDrive "UnloadSwitchTestDir" # Changed from New-Guid
                 New-Item -ItemType Directory -Path $tempDir | Out-Null
                 $envFile = Join-Path $tempDir '.env'
                 $varName = 'UNLOAD_TEST_VAR'
