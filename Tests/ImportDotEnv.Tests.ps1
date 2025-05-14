@@ -200,14 +200,12 @@ InModuleScope 'ImportDotEnv' {
                 # The real Get-EnvFilesUpstream collects current-to-root, then reverses.
                 # So, parent .env (if exists) comes before current's .env (if exists) in the final list.
                 if (Test-Path $script:ParentEnvPath) { # This is C:\Users\dani_\AppData\Local\Temp\.env
-                    $filesToReturn += $script:ParentEnvPath
+                    # For this specific test, we are only interested in the .env in TestRoot
+                    # $filesToReturn += $script:ParentEnvPath
                 }
                 $testRootOwnEnv = Join-Path $script:TestRoot ".env" # e.g., for the manual test
-                if (Test-Path $testRootOwnEnv) {
-                    $filesToReturn += $testRootOwnEnv
-                }
-                #Write-Host "MOCK Get-EnvFilesUpstream for TestRoot returning: $($filesToReturn -join ', ')" -ForegroundColor Magenta
-                return $filesToReturn
+                # Directly return the known .env file for TestRoot if it exists.
+                if (Test-Path $testRootOwnEnv) { return @($testRootOwnEnv) } else { return @() }
             }
             if ($resolvedDir -eq $script:ParentDirOfTestRoot) { # e.g. C:\Users\dani_\AppData\Local\Temp
                 # This directory, in the context of our tests, primarily has $script:ParentEnvPath
