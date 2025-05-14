@@ -283,6 +283,12 @@ InModuleScope 'ImportDotEnv' {
                     Write-Debug "Test 'loads variables...': Mock Get-EnvFilesUpstream actually returned: $($script:mockGetEnvFilesUpstreamOutput -join ', ')"
                     $currentManualTestVarValue = [Environment]::GetEnvironmentVariable("MANUAL_TEST_VAR")
                     Write-Debug "Test 'loads variables...': MANUAL_TEST_VAR value immediately before assertion: '$currentManualTestVarValue'"
+
+                    # Check module's internal state for what it thinks it loaded
+                    $modulePreviousEnvFiles = $script:ImportDotEnvModule.SessionState.PSVariable.GetValue('previousEnvFiles')
+                    Write-Debug "Test 'loads variables...': Module's internal previousEnvFiles: $($modulePreviousEnvFiles -join ', ')"
+                    $moduleTrueOriginals = $script:ImportDotEnvModule.SessionState.PSVariable.GetValue('trueOriginalEnvironmentVariables')
+                    Write-Debug "Test 'loads variables...': Module's internal trueOriginals for MANUAL_TEST_VAR: '$($moduleTrueOriginals['MANUAL_TEST_VAR'])'"
                     [Environment]::GetEnvironmentVariable("MANUAL_TEST_VAR") | Should -Be "loaded_manual"
                     Write-Debug "Test 'loads variables...': Assertion 1 passed."
                     Write-Debug "Test 'loads variables...': Module's trueOriginals for MANUAL_TEST_VAR: '$($script:trueOriginalEnvironmentVariables['MANUAL_TEST_VAR'])'"
