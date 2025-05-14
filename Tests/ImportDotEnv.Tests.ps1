@@ -857,34 +857,55 @@ InModuleScope 'ImportDotEnv' {
             # }
         }
 
-        Describe 'Import-DotEnv -List switch' -Tag 'ListSwitch' {
-            It 'lists active variables and their defining files when state is active' {
-                # Arrange: create a temp .env file
-                $tempDir = Join-Path $TestDrive (New-Guid)
-                New-Item -ItemType Directory -Path $tempDir | Out-Null
-                $envFile = Join-Path $tempDir '.env'
-                Set-Content -Path $envFile -Value @(
-                    'FOO=bar',
-                    'BAZ=qux'
-                )
+        Describe 'Import-DotEnv -List switch' {
+            BeforeAll {
+                function Invoke-ImportDotEnvListAndCaptureOutput {
+                    param(
+                        [switch]$MockPSVersion5
+                    )
+                    # Create temp dir and .env file in $TestDrive
+                    $tempDir = Join-Path $TestDrive (New-Guid)
+                    New-Item -ItemType Directory -Path $tempDir | Out-Null
+                    $tempDir2 = Join-Path $tempDir "tempDir2"
+                    New-Item -ItemType Directory -Path $tempDir2 | Out-Null
 
-                InModuleScope ImportDotEnv {
-                    # Simulate active state
-                    $script:previousEnvFiles = @($envFile)
-                    $script:previousWorkingDirectory = $tempDir
+                    $envFile = Join-Path $tempDir '.env'
+                    Set-Content -Path $envFile -Value @(
+                        'FOO=bar',
+                        'BAZ=qux'
+                    )
 
-                    # Act: capture output
-                    $output = Import-DotEnv -List *>&1
-
-                    # Assert: output contains variable names and file
-                    $outputString = $output | Out-String
-                    $outputString | Should -Match 'FOO'
-                    $outputString | Should -Match 'BAZ'
-                    $outputString | Should -Match '.env'
+                    $envFile2 = Join-Path $tempDir2 '.env'
+                    Set-Content -Path $envFile2 -Value @(
+                        'FOO=override',
+                        'GEZ=whatever'
+                    )
+                    if ($MockPSVersion5) {
+                        $script:PSVersionTable = @{ PSVersion = [version]'5.1.0.0' }
+                    }
+                    Import-DotEnv -Path $tempDir2
+                    $output = & { Import-DotEnv -List } *>&1
+                    $output | Out-String | Should -Match 'FOO'
+                    $output | Out-String | Should -Match 'BAZ'
+                    $output | Out-String | Should -Match 'GEZ'
+                    $output | Out-String | Should -Match '\.env'
                 }
-                # No cleanup needed for $TestDrive
             }
-        } # End of Describe "Import-DotEnv -List switch"
+            It 'lists active variables and their defining files when state is active (PowerShell 7+)' -Tag "ListSwitch" {
+                Invoke-ImportDotEnvListAndCaptureOutput
+
+            }
+
+            It 'lists active variables in table format when PSVersion is 5 (Windows PowerShell)' -Tag "ListSwitch" {
+                Invoke-ImportDotEnvListAndCaptureOutput -MockPSVersion5
+            }
+        }
+        It 'Import-DotEnv -List switch should report back correctly when no .env files are active' -Tag "focus" {
+            $output = & { Import-DotEnv -List } *>&1
+            $outputString = $output | Out-String
+            Write-Host "Output: $outputString" -ForegroundColor Yellow
+            $outputString | Should -Match 'No .env configuration is currently active or managed by ImportDotEnv.'
+        }
 
         Describe 'Import-DotEnv -Unload switch' -Tag 'UnloadSwitch' {
             It 'unloads variables and resets state after a load (in-process)' {
