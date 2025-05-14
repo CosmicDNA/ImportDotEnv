@@ -230,66 +230,13 @@ InModuleScope 'ImportDotEnv' {
         }
 
         Context "Helper Function Tests" {
-            # It "Get-RelativePath should handle errors and return original path" {
-            #     Mock ([System.IO.Path])::GetFullPath { throw "Simulated GetFullPath Error" } -ModuleName ImportDotEnv
-            #     $result = Get-RelativePath -Path "C:\some\path" -BasePath "C:\some\base"
-            #     $result | Should -Be "C:\some\path"
-            #     Should -WriteWarning -Message "Get-RelativePath: Error calculating relative path for Target 'C:\some\path' from Base 'C:\some\base'. Error: Simulated GetFullPath Error. Falling back to original target path."
-            # }
 
-            # It "Get-RelativePath should return '.' when Path and BasePath are the same" {
-            #     # This test relies on the actual System.IO.Path.GetFullPath behavior
-            #     $testDir = Join-Path $script:TestRoot "samePathTestForRelative"
-            #     New-Item -Path $testDir -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
-            #     try {
-            #         $result1 = Get-RelativePath -Path $testDir -BasePath $testDir
-            #         $result1 | Should -Be "."
-
-            #         # Test with variations that GetFullPath should normalize
-            #         $result2 = Get-RelativePath -Path "$testDir\" -BasePath $testDir
-            #         $result2 | Should -Be "."
-
-            #         $result3 = Get-RelativePath -Path $testDir -BasePath "$testDir\"
-            #         $result3 | Should -Be "."
-            #     }
-            #     finally {
-            #         if (Test-Path $testDir) { Remove-Item $testDir -Recurse -Force -ErrorAction SilentlyContinue }
-            #     }
-            # }
-
-            # It "Get-EnvFilesUpstream should handle Convert-Path errors and default to PWD" {
-            #     Mock Convert-Path { param($Path) if ($Path -eq "invalid_dir") { throw "Simulated Convert-Path Error" } else { return $Path } } -ModuleName ImportDotEnv
-            #     Push-Location $script:TestRoot
-            #     $expectedPwdEnvFile = Join-Path $script:TestRoot ".env.pwdtest"
-            #     Set-Content -Path $expectedPwdEnvFile -Value "PWD_VAR=pwd_val"
-            #     Rename-Item $expectedPwdEnvFile ".env" # Now it's the .env in PWD
-
-            #     $files = Get-EnvFilesUpstream -Directory "invalid_dir"
-
-            #     Pop-Location
-            #     Remove-Item (Join-Path $script:TestRoot ".env") -Force -ErrorAction SilentlyContinue
-
-            #     $files | Should -Not -BeNullOrEmpty
-            #     if ($files -is [string]) { # Defensive check for the "got C" issue
-            #         $files | Should -Be (Join-Path $script:TestRoot ".env")
-            #     } else {
-            #         $files[0] | Should -Be (Join-Path $script:TestRoot ".env") # Should have found the .env in PWD ($script:TestRoot)
-            #     }
-            #     Should -WriteWarning -Message "Get-EnvFilesUpstream: Error resolving path 'invalid_dir'. Error: Simulated Convert-Path Error. Defaulting to PWD."
-            # }
 
             It "Format-EnvFilePath should handle empty core path" {
                 Mock Get-RelativePath { return ".env" } -ModuleName ImportDotEnv
                 $result = Format-EnvFilePath -Path ".env" -BasePath "."
                 $result | Should -Be ".env" # No bolding expected
             }
-
-            # It "Format-VarHyperlink should use original path if Resolve-Path fails" {
-            #     $nonExistentFile = "C:\path\to\nonexistent\file.env"
-            #     Mock Resolve-Path { param($LiteralPath) if ($LiteralPath -eq $nonExistentFile) { throw "Resolve-Path error" } else { return $LiteralPath } } -ModuleName ImportDotEnv
-            #     $result = ImportDotEnv\Format-VarHyperlink -VarName "TEST_VAR" -FilePath $nonExistentFile -LineNumber 10
-            #     $result | Should -Contain "vscode://file/$($nonExistentFile):10"
-            # }
 
             It "Get-EnvVarsFromFiles (via Read-EnvFile) handles non-existent file" {
                 $nonExistentFile = Join-Path $script:TestRoot "nonexistent.env"
@@ -298,86 +245,10 @@ InModuleScope 'ImportDotEnv' {
                 $vars.Count | Should -Be 0
             }
 
-            # It "Get-EnvVarsFromFiles (via Read-EnvFile) handles file read error" {
-            #     $errorFile = Join-Path $script:TestRoot "error_read.env"
-            #     Set-Content -Path $errorFile -Value "TEMP=content" # File must exist
-            #     Mock ([System.IO.File])::ReadLines { param($Path) if ($Path -eq $errorFile) { throw "Simulated ReadLines Error" } else { return @() } } -ModuleName ImportDotEnv
-
-            #     $vars = Get-EnvVarsFromFiles -Files @($errorFile) -BasePath $script:TestRoot
-
-            #     Remove-Item $errorFile -Force
-            #     $vars | Should -BeOfType ([System.Collections.Hashtable])
-            #     $vars.Count | Should -Be 0
-            #     Should -WriteWarning -Message "Parse-EnvFile: Error reading file '$errorFile'. Error: Simulated ReadLines Error"
-            # }
         }
 
         Context "Import-DotEnv Direct Invocation Parameters" {
-            # It "Import-DotEnv -Help should display help text" {
-            #     { Import-DotEnv -Help } | Should -WriteHost -Message "*Import-DotEnv Module Help*" -Wildcard
-            # }
 
-            # It "Import-DotEnv -List shows 'no active configuration' when state is clean" {
-            #     $script:previousEnvFiles = @()
-            #     $script:previousWorkingDirectory = "STATE_AFTER_EXPLICIT_UNLOAD"
-            #     { Import-DotEnv -List } | Should -WriteHost -Message "No .env configuration is currently active or managed by ImportDotEnv."
-            # }
-
-            # It "Import-DotEnv -List shows 'no effective variables' for empty .env files" {
-            #     $emptyEnv = Join-Path $script:TestRoot "empty.env"
-            #     Set-Content -Path $emptyEnv -Value ""
-            #     $script:previousEnvFiles = @($emptyEnv)
-            #     $script:previousWorkingDirectory = $script:TestRoot
-
-            #     { Import-DotEnv -List } | Should -WriteHost -Message "No effective variables found in the active configuration."
-            #     Remove-Item $emptyEnv -Force
-            # }
-
-            # It "Import-DotEnv -Unload does nothing if no vars were loaded" {
-            #     $script:previousEnvFiles = @()
-            #     $script:previousWorkingDirectory = "STATE_AFTER_EXPLICIT_UNLOAD"
-            #     { Import-DotEnv -Unload } | Should -Not -WriteHost -Message "*Unloading active .env configuration(s)...*" -Wildcard -PassThru |
-            #         Should -WriteDebug -Message "MODULE Import-DotEnv: Called with -Unload switch."
-            # }
-
-            # It "Import-DotEnv -Unload correctly unloads variables and resets state after a load" {
-            #     $unloadTestVarName = "UNLOAD_SPECIFIC_TEST_VAR"
-            #     $initialUnloadTestVarValue = [Environment]::GetEnvironmentVariable($unloadTestVarName)
-            #     if ($null -ne $initialUnloadTestVarValue) {
-            #         [Environment]::SetEnvironmentVariable($unloadTestVarName, $null)
-            #     }
-
-            #     $unloadEnvFile = Join-Path $script:TestRoot "unload_test.env"
-            #     Set-Content -Path $unloadEnvFile -Value "$unloadTestVarName=i_was_loaded_for_unload"
-
-            #     try {
-            #         Mock Get-EnvFilesUpstream { param($Directory) if ($Directory -eq $script:TestRoot) { return @($unloadEnvFile) } else { return @() } } -ModuleName ImportDotEnv
-
-            #         Import-DotEnv -Path $script:TestRoot
-            #         [Environment]::GetEnvironmentVariable($unloadTestVarName) | Should -Be "i_was_loaded_for_unload"
-            #         $script:ImportDotEnvModule.SessionState.PSVariable.GetValue('previousEnvFiles') | Should -BeExactly @($unloadEnvFile)
-            #         $script:ImportDotEnvModule.SessionState.PSVariable.GetValue('previousWorkingDirectory') | Should -Be $script:TestRoot
-
-            #         { Import-DotEnv -Unload } | Should -WriteHost -Message "*Unloading active .env configuration(s)...*" -Wildcard -PassThru |
-            #                                    Should -WriteHost -Message "*Environment restored. Module state reset.*" -Wildcard
-
-            #         if ($null -eq $initialUnloadTestVarValue) {
-            #             (Test-Path Env:\$unloadTestVarName) | Should -Be $false
-            #         } else {
-            #             [Environment]::GetEnvironmentVariable($unloadTestVarName) | Should -Be $initialUnloadTestVarValue
-            #         }
-            #         $script:ImportDotEnvModule.SessionState.PSVariable.GetValue('previousEnvFiles') | Should -BeEmpty
-            #         $script:ImportDotEnvModule.SessionState.PSVariable.GetValue('previousWorkingDirectory') | Should -Be "STATE_AFTER_EXPLICIT_UNLOAD"
-            #     }
-            #     finally {
-            #         if (Test-Path $unloadEnvFile) { Remove-Item $unloadEnvFile -Force }
-            #         if ($null -ne $initialUnloadTestVarValue) {
-            #             [Environment]::SetEnvironmentVariable($unloadTestVarName, $initialUnloadTestVarValue)
-            #         } else {
-            #             [Environment]::SetEnvironmentVariable($unloadTestVarName, $null)
-            #         }
-            #     }
-            # }
 
             It "Import-DotEnv load path handles no .env files found" {
                 Mock Get-EnvFilesUpstream { return @() } -ModuleName ImportDotEnv
@@ -416,45 +287,6 @@ InModuleScope 'ImportDotEnv' {
                 }
             }
         }
-
-        # Context "Restore-EnvVars Functionality" {
-        #     BeforeEach {
-        #         $script:trueOriginalEnvironmentVariables = @{
-        #             "EXISTING_VAR" = "original_value"
-        #             "TO_BE_UNSET_VAR" = $null
-        #         }
-        #         [Environment]::SetEnvironmentVariable("EXISTING_VAR", "current_env_value_before_restore")
-        #         [Environment]::SetEnvironmentVariable("TO_BE_UNSET_VAR", "current_env_value_before_restore")
-        #         [Environment]::SetEnvironmentVariable("NEW_VAR_NO_ORIGINAL", "current_env_value_before_restore")
-        #     }
-
-        #     It "Restores variables from VarsToRestoreByFileMap" {
-        #         $fileMap = @{ (Join-Path $script:TestRoot "fake.env") = [System.Collections.Generic.List[string]]::new() }
-        #         $fileMap[(Join-Path $script:TestRoot "fake.env")].Add("EXISTING_VAR")
-
-        #         Invoke-PesterBlock {
-        #             Restore-EnvVars -VarsToRestoreByFileMap $fileMap -TrueOriginalEnvironmentVariables $script:trueOriginalEnvironmentVariables -BasePath $script:TestRoot
-        #         }
-        #         [Environment]::GetEnvironmentVariable("EXISTING_VAR") | Should -Be "original_value"
-        #         Get-HostCallHistory | Should -WriteMessage -Message "*Restoring .env file*" -Wildcard -Stream Host
-        #         Get-HostCallHistory | Should -WriteMessage -Message "*Restored environment variable:*EXISTING_VAR*" -Wildcard -Stream Host
-        #     }
-
-        #     It "Restores variables from VarNames (no source file)" {
-        #         Invoke-PesterBlock {
-        #             Restore-EnvVars -VarNames @("TO_BE_UNSET_VAR") -TrueOriginalEnvironmentVariables $script:trueOriginalEnvironmentVariables -BasePath $script:TestRoot
-        #         }
-        #         (Test-Path Env:\TO_BE_UNSET_VAR) | Should -Be $false
-        #         Get-HostCallHistory | Should -WriteMessage -Message "*Restoring environment variables not associated with any .env file:*" -Wildcard -Stream Host
-        #         Get-HostCallHistory | Should -WriteMessage -Message "*Unset environment variable:*TO_BE_UNSET_VAR*" -Wildcard -Stream Host
-        #     }
-
-        #     It "Handles empty inputs gracefully" {
-        #         { Restore-EnvVars -TrueOriginalEnvironmentVariables $script:trueOriginalEnvironmentVariables -BasePath $script:TestRoot } |
-        #             Should -Not -WriteHost -Message "*Restoring .env file*" -Wildcard -PassThru |
-        #             Should -Not -WriteHost -Message "*Restoring environment variables not associated with any .env file:*" -Wildcard
-        #     }
-        # }
 
         Context "Set-Location Integration (Enable/Disable Functionality)" {
             AfterEach {
@@ -624,51 +456,6 @@ InModuleScope 'ImportDotEnv' {
                 (Get-Command cd).Definition | Should -Be "Set-Location"
             }
         }
-
-        # Context "Invoke-ImportDotEnvSetLocationWrapper Parameter Variations" {
-        #     BeforeEach {
-        #         Disable-ImportDotEnvCdIntegration -ErrorAction SilentlyContinue
-        #     }
-
-        #     It "Invoke-ImportDotEnvSetLocationWrapper works with -LiteralPath" {
-        #         Mock Microsoft.PowerShell.Management\Set-Location { param([string]$LiteralPath, [string]$Path) }
-        #         Mock Import-DotEnv {}
-
-        #         ImportDotEnv\Invoke-ImportDotEnvSetLocationWrapper -LiteralPath $script:DirA.FullName
-
-        #         Should - not -HaveError
-        #         Get-MockCall Microsoft.PowerShell.Management\Set-Location | Should -HaveParameter -Name LiteralPath -Value $script:DirA.FullName
-        #         Get-MockCall Import-DotEnv | Should -HaveParameter -Name Path -Value $script:DirA.FullName
-        #     }
-
-        #     It "Invoke-ImportDotEnvSetLocationWrapper works with -PassThru" {
-        #         Mock Microsoft.PowerShell.Management\Set-Location { param([string]$Path, [switch]$PassThru) if ($PassThru.IsPresent) { return (Get-Item $Path) } }
-        #         Mock Import-DotEnv {}
-
-        #         $result = ImportDotEnv\Invoke-ImportDotEnvSetLocationWrapper -Path $script:DirB.FullName -PassThru
-
-        #         Should - not -HaveError
-        #         $result.FullName | Should -Be $script:DirB.FullName
-        #         Get-MockCall Microsoft.PowerShell.Management\Set-Location | Should -HaveParameter -Name PassThru
-        #         Get-MockCall Import-DotEnv | Should -HaveParameter -Name Path -Value $script:DirB.FullName
-        #     }
-
-        #     It "Invoke-ImportDotEnvSetLocationWrapper works with -StackName" {
-        #         Mock Microsoft.PowerShell.Management\Set-Location { param([string]$Path, [string]$StackName) }
-        #         Mock Import-DotEnv {}
-        #         Push-Location $script:TestRoot -StackName "MyStack" -ErrorAction SilentlyContinue
-
-        #         ImportDotEnv\Invoke-ImportDotEnvSetLocationWrapper -Path $script:DirC.FullName -StackName "MyStack"
-
-        #         Should - not -HaveError
-        #         Get-MockCall Microsoft.PowerShell.Management\Set-Location | Should -HaveParameter -Name StackName -Value "MyStack"
-        #         Get-MockCall Import-DotEnv | Should -HaveParameter -Name Path -Value $script:DirC.FullName
-
-        #         try { Pop-Location -StackName "MyStack" -ErrorAction SilentlyContinue } catch {}
-        #         if (Get-Location -StackName "MyStack" -ErrorAction SilentlyContinue) {
-        #         }
-        #     }
-        # }
 
         Context "Set-Location Integration - Variable Loading Scenarios" {
             BeforeEach {
