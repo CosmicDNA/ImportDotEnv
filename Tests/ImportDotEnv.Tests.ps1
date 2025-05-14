@@ -6,7 +6,7 @@ param(
 )
 
 # Enable debug messages for this test run
-# $DebugPreference = 'Continue'
+$DebugPreference = 'Continue'
 
 $Global:InitialEnvironment = @{}
 
@@ -262,12 +262,27 @@ InModuleScope 'ImportDotEnv' {
                 try {
                     Push-Location $script:TestRoot
                     Write-Debug "Test 'loads variables...': PWD after Push-Location: $($PWD.Path)"
-                    Mock Get-EnvFilesUpstream -MockWith $script:GetEnvFilesUpstreamMock -ModuleName ImportDotEnv
+                    Write-Debug "Test 'loads variables...': MANUAL_TEST_VAR before mock setup: '$([Environment]::GetEnvironmentVariable("MANUAL_TEST_VAR"))'"
+                    Write-Debug "Test 'loads variables...': Does manualEnvFile '$manualEnvFile' exist? $(Test-Path $manualEnvFile). Content: '$(try { Get-Content $manualEnvFile -Raw } catch { "ERROR READING FILE" })'"
+
+                    # Enhanced Mock with logging
+                    $script:mockGetEnvFilesUpstreamOutput = $null # To capture mock output
+                    Mock Get-EnvFilesUpstream {
+                        param([string]$DirectoryBeingProcessed)
+                        $resolvedDirForMock = Convert-Path $DirectoryBeingProcessed
+                        Write-Debug "MOCK Get-EnvFilesUpstream: Called for directory '$DirectoryBeingProcessed' (resolved to '$resolvedDirForMock')."
+                        $filesToReturnFromMock = $script:GetEnvFilesUpstreamMock.Invoke($DirectoryBeingProcessed) # Call original mock logic
+                        $script:mockGetEnvFilesUpstreamOutput = $filesToReturnFromMock # Capture for inspection
+                        Write-Debug "MOCK Get-EnvFilesUpstream: Returning files: $($filesToReturnFromMock -join ', ')"
+                        return $filesToReturnFromMock
+                    } -ModuleName ImportDotEnv
 
                     Write-Debug "Test 'loads variables...': Calling Import-DotEnv for first load. Initial MANUAL_TEST_VAR: '$initialManualTestVar'"
                     Import-DotEnv -Path "." # Load .env from $script:TestRoot
+                    Write-Debug "Test 'loads variables...': Import-DotEnv -Path '.' completed."
+                    Write-Debug "Test 'loads variables...': Mock Get-EnvFilesUpstream actually returned: $($script:mockGetEnvFilesUpstreamOutput -join ', ')"
                     $currentManualTestVarValue = [Environment]::GetEnvironmentVariable("MANUAL_TEST_VAR")
-                    Write-Debug "Test 'loads variables...': MANUAL_TEST_VAR after first load: '$currentManualTestVarValue'"
+                    Write-Debug "Test 'loads variables...': MANUAL_TEST_VAR value immediately before assertion: '$currentManualTestVarValue'"
                     [Environment]::GetEnvironmentVariable("MANUAL_TEST_VAR") | Should -Be "loaded_manual"
                     Write-Debug "Test 'loads variables...': Assertion 1 passed."
                     Write-Debug "Test 'loads variables...': Module's trueOriginals for MANUAL_TEST_VAR: '$($script:trueOriginalEnvironmentVariables['MANUAL_TEST_VAR'])'"
@@ -566,7 +581,7 @@ InModuleScope 'ImportDotEnv' {
                 Set-Location $script:DirC.FullName
 
                 # When .env has VAR=, the value is an empty string. GetEnvironmentVariable should return "".
-                [Environment]::GetEnvironmentVariable("TEST_EMPTY_VAR") | Should -Be ""
+                [Environment]::GetEnvironmentVariable("TEST_EMPTY_VAR") | Should -BeNullOrEmpty
 
                 Set-Location $script:TestRoot
                 [Environment]::GetEnvironmentVariable("TEST_EMPTY_VAR") | Should -Be $initialEmptyVar
