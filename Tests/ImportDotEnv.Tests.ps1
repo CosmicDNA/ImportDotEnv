@@ -5,8 +5,8 @@ param(
     [string]$ModulePath = (Resolve-Path (Join-Path $PSScriptRoot "..\ImportDotEnv.psm1")).Path # Assuming tests are in a subfolder
 )
 
-# Enable debug messages for this test run
-$DebugPreference = 'Continue'
+# Disable debug messages for this test run
+# $DebugPreference = 'Continue'
 
 $Global:InitialEnvironment = @{}
 
@@ -253,9 +253,9 @@ InModuleScope 'ImportDotEnv' {
         Context "Core Import-DotEnv Functionality (Manual Invocation)" {
             It "loads variables when Import-DotEnv is called directly and restores on subsequent call for parent" {
                 # Force $DebugPreference for this specific test, and use Write-Host for critical early diagnostics
-                $DebugPreference = 'Continue'
-                Write-Host "DIAGNOSTIC (Test Start): Test 'loads variables...' starting. DebugPreference: $DebugPreference"
-                Write-Host "DIAGNOSTIC (Test Start): script:TestRoot is '$($script:TestRoot)'"
+                # $DebugPreference = 'Continue' # Keep global one active
+                Write-Debug "DIAGNOSTIC (Test Start): Test 'loads variables...' starting. DebugPreference: $DebugPreference"
+                Write-Debug "DIAGNOSTIC (Test Start): script:TestRoot is '$($script:TestRoot)'"
                 $initialManualTestVar = [Environment]::GetEnvironmentVariable("MANUAL_TEST_VAR") # Capture initial state
                 $manualEnvFile = Join-Path $script:TestRoot ".env"
                 Set-Content -Path $manualEnvFile -Value "MANUAL_TEST_VAR=loaded_manual"
@@ -264,43 +264,43 @@ InModuleScope 'ImportDotEnv' {
                 $Error.Clear()
                 try {
                     Push-Location $script:TestRoot
-                    Write-Host "DIAGNOSTIC (Inside Try): PWD after Push-Location: $($PWD.Path)"
-                    Write-Host "DIAGNOSTIC (Inside Try): MANUAL_TEST_VAR before mock setup: '$([Environment]::GetEnvironmentVariable("MANUAL_TEST_VAR"))'"
-                    Write-Host "DIAGNOSTIC (Inside Try): Does manualEnvFile '$manualEnvFile' exist? $(Test-Path $manualEnvFile). Content: '$(try { Get-Content $manualEnvFile -Raw } catch { "ERROR READING FILE" })'"
+                    Write-Debug "DIAGNOSTIC (Inside Try): PWD after Push-Location: $($PWD.Path)"
+                    Write-Debug "DIAGNOSTIC (Inside Try): MANUAL_TEST_VAR before mock setup: '$([Environment]::GetEnvironmentVariable("MANUAL_TEST_VAR"))'"
+                    Write-Debug "DIAGNOSTIC (Inside Try): Does manualEnvFile '$manualEnvFile' exist? $(Test-Path $manualEnvFile). Content: '$(try { Get-Content $manualEnvFile -Raw } catch { "ERROR READING FILE" })'"
 
                     # Enhanced Mock with logging
                     $script:mockGetEnvFilesUpstreamOutput = $null # To capture mock output
                     Mock Get-EnvFilesUpstream {
                         param([string]$DirectoryBeingProcessed)
                         $resolvedDirForMock = Convert-Path $DirectoryBeingProcessed
-                        Write-Host "DIAGNOSTIC (Mock): Get-EnvFilesUpstream called for directory '$DirectoryBeingProcessed' (resolved to '$resolvedDirForMock')."
+                        Write-Debug "DIAGNOSTIC (Mock): Get-EnvFilesUpstream called for directory '$DirectoryBeingProcessed' (resolved to '$resolvedDirForMock')."
                         $filesToReturnFromMock = $script:GetEnvFilesUpstreamMock.Invoke($DirectoryBeingProcessed) # Call original mock logic
                         $script:mockGetEnvFilesUpstreamOutput = $filesToReturnFromMock # Capture for inspection
-                        Write-Host "DIAGNOSTIC (Mock): Get-EnvFilesUpstream returning files: $($filesToReturnFromMock -join ', ')"
+                        Write-Debug "DIAGNOSTIC (Mock): Get-EnvFilesUpstream returning files: $($filesToReturnFromMock -join ', ')"
                         return $filesToReturnFromMock
                     } -ModuleName ImportDotEnv
 
-                    Write-Host "DIAGNOSTIC (Inside Try): Calling Import-DotEnv for first load. Initial MANUAL_TEST_VAR: '$initialManualTestVar'"
+                    Write-Debug "DIAGNOSTIC (Inside Try): Calling Import-DotEnv for first load. Initial MANUAL_TEST_VAR: '$initialManualTestVar'"
                     Import-DotEnv -Path "." # Load .env from $script:TestRoot
-                    Write-Host "DIAGNOSTIC (Inside Try): Import-DotEnv -Path '.' completed."
-                    Write-Host "DIAGNOSTIC (Inside Try): Mock Get-EnvFilesUpstream actually returned: $($script:mockGetEnvFilesUpstreamOutput -join ', ')"
+                    Write-Debug "DIAGNOSTIC (Inside Try): Import-DotEnv -Path '.' completed."
+                    Write-Debug "DIAGNOSTIC (Inside Try): Mock Get-EnvFilesUpstream actually returned: $($script:mockGetEnvFilesUpstreamOutput -join ', ')"
                     $currentManualTestVarValue = [Environment]::GetEnvironmentVariable("MANUAL_TEST_VAR")
-                    Write-Host "DIAGNOSTIC (Inside Try): MANUAL_TEST_VAR value immediately before assertion: '$currentManualTestVarValue'"
+                    Write-Debug "DIAGNOSTIC (Inside Try): MANUAL_TEST_VAR value immediately before assertion: '$currentManualTestVarValue'"
 
                     # Check module's internal state for what it thinks it loaded
                     $modulePreviousEnvFiles = $script:ImportDotEnvModule.SessionState.PSVariable.GetValue('previousEnvFiles')
-                    Write-Host "DIAGNOSTIC (Inside Try): Module's internal previousEnvFiles: $($modulePreviousEnvFiles -join ', ')"
+                    Write-Debug "DIAGNOSTIC (Inside Try): Module's internal previousEnvFiles: $($modulePreviousEnvFiles -join ', ')"
                     $moduleTrueOriginals = $script:ImportDotEnvModule.SessionState.PSVariable.GetValue('trueOriginalEnvironmentVariables')
-                    Write-Host "DIAGNOSTIC (Inside Try): Module's internal trueOriginals for MANUAL_TEST_VAR: '$($moduleTrueOriginals['MANUAL_TEST_VAR'])'"
+                    Write-Debug "DIAGNOSTIC (Inside Try): Module's internal trueOriginals for MANUAL_TEST_VAR: '$($moduleTrueOriginals['MANUAL_TEST_VAR'])'"
                     [Environment]::GetEnvironmentVariable("MANUAL_TEST_VAR") | Should -Be "loaded_manual"
-                    Write-Host "DIAGNOSTIC (Inside Try): Assertion 1 passed."
-                    Write-Host "DIAGNOSTIC (Inside Try): Module's trueOriginals for MANUAL_TEST_VAR: '$($script:trueOriginalEnvironmentVariables['MANUAL_TEST_VAR'])'"
+                    Write-Debug "DIAGNOSTIC (Inside Try): Assertion 1 passed."
+                    Write-Debug "DIAGNOSTIC (Inside Try): Module's trueOriginals for MANUAL_TEST_VAR: '$($script:trueOriginalEnvironmentVariables['MANUAL_TEST_VAR'])'"
 
                     # Simulate moving out by calling Import-DotEnv for the parent
-                    Write-Host "DIAGNOSTIC (Inside Try): Calling Import-DotEnv for parent restore. PWD: $($PWD.Path)"
+                    Write-Debug "DIAGNOSTIC (Inside Try): Calling Import-DotEnv for parent restore. PWD: $($PWD.Path)"
                     Import-DotEnv -Path $script:ParentDirOfTestRoot
                     $restoredManualTestVarValue = [Environment]::GetEnvironmentVariable("MANUAL_TEST_VAR")
-                    Write-Host "DIAGNOSTIC (Inside Try): MANUAL_TEST_VAR after parent restore call: '$restoredManualTestVarValue'"
+                    Write-Debug "DIAGNOSTIC (Inside Try): MANUAL_TEST_VAR after parent restore call: '$restoredManualTestVarValue'"
 
                     # Check if MANUAL_TEST_VAR was restored to its original value or unset if it didn't exist
                     if ($null -eq $initialManualTestVar) {
@@ -309,9 +309,9 @@ InModuleScope 'ImportDotEnv' {
                     } else {
                         [Environment]::GetEnvironmentVariable("MANUAL_TEST_VAR") | Should -Be $initialManualTestVar
                     }
-                    Write-Host "DIAGNOSTIC (Inside Try): Assertion 2 passed."
+                    Write-Debug "DIAGNOSTIC (Inside Try): Assertion 2 passed."
                     Pop-Location
-                    Write-Host "DIAGNOSTIC (Inside Try): Pop-Location successful."
+                    Write-Debug "DIAGNOSTIC (Inside Try): Pop-Location successful."
                 }
                 catch {
                     Write-Error "Test 'loads variables...' FAILED with exception: $($_.ToString())"
