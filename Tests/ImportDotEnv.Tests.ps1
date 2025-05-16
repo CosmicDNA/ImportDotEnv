@@ -67,6 +67,10 @@ InModuleScope 'ImportDotEnv' {
             $script:TestRoot = Join-Path $TestDrive "ImportDotEnvPesterTests"
             New-Item -Path $script:TestRoot -ItemType Directory | Out-Null
 
+            # Add a .env file directly in the test root for specific tests
+            $script:TestRootEnvPath = Join-Path $script:TestRoot ".env"
+            Set-Content -Path $script:TestRootEnvPath -Value "TEST_ROOT_VAR=root_val"
+
             $script:ParentDirOfTestRoot = $TestDrive
             $script:ParentEnvPath = Join-Path $script:ParentDirOfTestRoot ".env"
 
@@ -208,10 +212,7 @@ InModuleScope 'ImportDotEnv' {
             if ($resolvedDir -eq $script:NonEnvDir.FullName) { return @() }
 
             if ($resolvedDir -eq $script:TestRoot) {
-                $filesToReturn = @()
-                if (Test-Path $script:ParentEnvPath) {
-                    # $filesToReturn += $script:ParentEnvPath
-                }
+                # This mock logic is slightly different from the actual function's upstream search
                 $testRootOwnEnv = Join-Path $script:TestRoot ".env"
                 if (Test-Path $testRootOwnEnv) { return @($testRootOwnEnv) } else { return @() }
             }
@@ -225,6 +226,7 @@ InModuleScope 'ImportDotEnv' {
         }
 
         Context "Helper Function Tests" {
+            # Tests for Get-RelativePath and Get-EnvVarsFromFiles (via Read-EnvFile)
             It "Format-EnvFilePath should handle empty core path" {
                 Mock Get-RelativePath { return ".env" } -ModuleName ImportDotEnv
                 $result = Format-EnvFilePath -Path ".env" -BasePath "."
@@ -236,6 +238,42 @@ InModuleScope 'ImportDotEnv' {
                 $vars = Get-EnvVarsFromFiles -Files @($nonExistentFile) -BasePath $script:TestRoot
                 $vars | Should -BeOfType ([System.Collections.Hashtable])
                 $vars.Count | Should -Be 0
+            }
+
+            # Tests for Get-EnvFilesUpstream
+            It "Get-EnvFilesUpstream finds .env files hierarchically and returns in correct order" {
+                # This test uses the actual Get-EnvFilesUpstream function, not the mock defined above
+                $expectedFiles = @(
+                    $script:TestRootEnvPath,
+                    (Join-Path $script:BaseDir.FullName ".env"),
+                    (Join-Path $script:SubDir.FullName ".env")
+                )
+                $foundFiles = Get-EnvFilesUpstream -Directory $script:SubDir.FullName
+                $foundFiles | Should -BeExactly $expectedFiles
+            }
+
+            It "Get-EnvFilesUpstream finds local .env and its parent's .env file" {
+                $expectedFiles = @(
+                    $script:TestRootEnvPath,
+                    (Join-Path $script:DirWithOwnEnv.FullName ".env")
+                )
+                $foundFiles = Get-EnvFilesUpstream -Directory $script:DirWithOwnEnv.FullName
+                $foundFiles | Should -BeExactly $expectedFiles
+            }
+
+            It "Get-EnvFilesUpstream finds a parent's .env file if local one is missing" {
+                $expectedFiles = @(
+                    $script:TestRootEnvPath
+                )
+                $foundFiles = Get-EnvFilesUpstream -Directory $script:NonEnvDir.FullName
+                $foundFiles | Should -BeExactly $expectedFiles
+            }
+
+            It "Get-EnvFilesUpstream finds only the local .env when searching from the test root" {
+                 # This tests the scenario where the search starts at the root and finds only its own .env
+                $expectedFiles = @($script:TestRootEnvPath) # This expectation is correct
+                $foundFiles = Get-EnvFilesUpstream -Directory $script:TestRoot.FullName
+                $foundFiles | Should -BeExactly $expectedFiles
             }
         }
 
