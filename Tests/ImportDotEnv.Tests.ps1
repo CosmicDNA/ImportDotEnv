@@ -21,6 +21,33 @@ Write-Debug "Top-level: Import-Module executed."
 # Wrap the entire Describe block in InModuleScope
 InModuleScope 'ImportDotEnv' {
 
+    # Define the helper function logic as a scriptblock outside InModuleScope,
+    # but store it in script scope to be passed into the module scope for invocation.
+    $script:InvokeImportDotEnvListAndCaptureOutputScriptBlock = {
+        param(
+            [string]$PathToLoadForList,
+            [switch]$MockPSVersion5ForList
+        )
+        # This scriptblock runs inside the module scope when invoked with &
+        $originalPSVersionTable = $null # Store original
+        if ($MockPSVersion5ForList) {
+            # Access script:PSVersionTable which is available in the module scope
+            $originalPSVersionTable = $script:PSVersionTable
+            $script:PSVersionTable = @{ PSVersion = [version]'5.1.0.0' } # Mock PS5 version
+        }
+
+        try {
+            Import-DotEnv -Path $PathToLoadForList # Load .env files for the target path
+            $output = & { Import-DotEnv -List } *>&1 # Capture output from -List
+            return $output | Out-String
+        }
+        finally {
+            if ($MockPSVersion5ForList -and $originalPSVersionTable) {
+                $script:PSVersionTable = $originalPSVersionTable # Restore original PSVersionTable
+            }
+        }
+    } # End of scriptblock definition
+
     Describe "Import-DotEnv Core and Integration Tests" {
         BeforeAll { # Runs once before any test in this Describe block
             $script:ImportDotEnvModule = Get-Module ImportDotEnv # Store it in script scope
@@ -31,23 +58,17 @@ InModuleScope 'ImportDotEnv' {
             Write-Debug "BeforeAll: ImportDotEnv module IS loaded."
 
             # Store initial state of any test-related environment variables
-            $testVarNames = @("TEST_VAR_GLOBAL", "TEST_VAR_A", "TEST_VAR_BASE", "TEST_VAR_OVERRIDE", "TEST_VAR_SUB", "NEW_VAR", "TEST_EMPTY_VAR", "PROJECT_ID", "MANUAL_TEST_VAR")
+            $testVarNames = @("TEST_VAR_GLOBAL", "TEST_VAR_A", "TEST_VAR_BASE", "TEST_VAR_OVERRIDE", "TEST_VAR_SUB", "NEW_VAR", "TEST_EMPTY_VAR", "PROJECT_ID", "MANUAL_TEST_VAR", "HELP_SWITCH_TEST_VAR")
             foreach ($varName in $testVarNames) {
                 $Global:InitialEnvironment[$varName] = [Environment]::GetEnvironmentVariable($varName)
             }
 
             # Create temporary directory structure for tests using $TestDrive
             $script:TestRoot = Join-Path $TestDrive "ImportDotEnvPesterTests"
-            # Pester creates $TestDrive, so we only need to create our subdirectory if it doesn't exist (e.g., from a previous failed run if not cleaned)
-            # However, Pester should clean $TestDrive before each file, so this explicit removal is usually not needed.
-            # if (Test-Path $script:TestRoot) {
-            #     Write-Debug "BeforeAll: Removing existing TestRoot '$script:TestRoot' (should be handled by Pester)"
-            #     Remove-Item $script:TestRoot -Recurse -Force
-            # }
             New-Item -Path $script:TestRoot -ItemType Directory | Out-Null
 
-            $script:ParentDirOfTestRoot = $TestDrive # The root of TestDrive will act as the parent for TestRoot
-            $script:ParentEnvPath = Join-Path $script:ParentDirOfTestRoot ".env" # e.g., C:\Users\dani_\AppData\Local\Temp\.env
+            $script:ParentDirOfTestRoot = $TestDrive
+            $script:ParentEnvPath = Join-Path $script:ParentDirOfTestRoot ".env"
 
             $script:DirWithOwnEnv = New-Item -Path (Join-Path $script:TestRoot "DirWithOwnEnv") -ItemType Directory
             Set-Content -Path (Join-Path $script:DirWithOwnEnv.FullName ".env") -Value "GALLERY_API_KEY=abc123`nGALLERY_2=def456"
@@ -84,14 +105,12 @@ InModuleScope 'ImportDotEnv' {
             $script:NonEnvDir = New-Item -Path (Join-Path $script:TestRoot "nonEnvDir") -ItemType Directory
         }
 
-        BeforeEach { # Runs before each It in this Describe block
-            # Variables that are truly global/external and whose pre-Pester state should be restored by BeforeEach
-            $globalTestVarNames = @("TEST_VAR_GLOBAL", "TEST_VAR_BASE", "TEST_VAR_OVERRIDE", "TEST_EMPTY_VAR", "PROJECT_ID", "MANUAL_TEST_VAR")
-            # Variables that are primarily created/manipulated by test scenarios and should always be cleared
+        BeforeEach {
+            $globalTestVarNames = @("TEST_VAR_GLOBAL", "TEST_VAR_BASE", "TEST_VAR_OVERRIDE", "TEST_EMPTY_VAR", "PROJECT_ID", "MANUAL_TEST_VAR", "HELP_SWITCH_TEST_VAR")
             $scenarioSpecificVarNames = @("TEST_VAR_A", "TEST_VAR_SUB", "NEW_VAR")
 
             foreach ($varName in $globalTestVarNames) {
-                $initialVal = $Global:InitialEnvironment[$varName] # This relies on $Global:InitialEnvironment being pristine
+                $initialVal = $Global:InitialEnvironment[$varName]
                 if ($null -eq $initialVal) {
                     if (Test-Path "Env:\$varName") { Remove-Item "Env:\$varName" -Force -ErrorAction SilentlyContinue }
                     [Environment]::SetEnvironmentVariable($varName, $null)
@@ -102,9 +121,7 @@ InModuleScope 'ImportDotEnv' {
 
             foreach ($varName in $scenarioSpecificVarNames) {
                 Write-Debug "BeforeEach: Unconditionally clearing scenario-specific var '$varName'. Initial Test-Path: $(Test-Path \"Env:\\$varName\"), Initial Value: '$([Environment]::GetEnvironmentVariable($varName))'"
-                # Attempt to clear the variable from the process environment first.
                 [Environment]::SetEnvironmentVariable($varName, $null)
-                # Then, ensure it's also cleared from PowerShell's Env: drive if it lingers.
                 if (Test-Path "Env:\$varName") { Remove-Item "Env:\$varName" -Force -ErrorAction SilentlyContinue }
 
                 if ([Environment]::GetEnvironmentVariable($varName) -ne $null) {
@@ -122,10 +139,9 @@ InModuleScope 'ImportDotEnv' {
                 throw "BeforeEach: script:ImportDotEnvModule is not available for state reset!"
             }
             Write-Debug "BeforeEach: Directly resetting ImportDotEnv module's internal script variables."
-            # Since we are InModuleScope, we can directly set the script-scoped variables
             $script:trueOriginalEnvironmentVariables = @{}
             $script:previousEnvFiles = @()
-            $script:previousWorkingDirectory = "RESET_BY_BEFORE_EACH_TEST_HOOK" # Match initial state or a known reset state
+            $script:previousWorkingDirectory = "RESET_BY_BEFORE_EACH_TEST_HOOK"
 
             $currentTrueOriginals = $script:ImportDotEnvModule.SessionState.PSVariable.GetValue('trueOriginalEnvironmentVariables')
             Write-Debug "BeforeEach (Describe): After reset, trueOriginalEnvironmentVariables count: $($currentTrueOriginals.Count). Keys: $($currentTrueOriginals.Keys -join ', ')"
@@ -133,20 +149,17 @@ InModuleScope 'ImportDotEnv' {
                  Microsoft.PowerShell.Management\Set-Location $script:TestRoot
                  Write-Debug "Describe-level BeforeEach: PWD reset to $($PWD.Path)"
             }
-            # $script:ImportDotEnvModule.SessionState.PSVariable.Set('previousWorkingDirectory', "RESET_BY_BEFORE_EACH_TEST_HOOK") # Done above
 
             Write-Debug "BeforeEach: Module state reset. TrueOriginalEnvironmentVariables count: $($script:ImportDotEnvModule.SessionState.PSVariable.GetValue('trueOriginalEnvironmentVariables').Count)"
             Write-Debug "BeforeEach: Module state reset. PreviousEnvFiles count: $($script:ImportDotEnvModule.SessionState.PSVariable.GetValue('previousEnvFiles').Count)"
             Write-Debug "BeforeEach: Module state reset. PreviousWorkingDirectory: $($script:ImportDotEnvModule.SessionState.PSVariable.GetValue('previousWorkingDirectory'))"
         }
 
-        AfterAll { # Runs once after all tests in this Describe block
+        AfterAll {
             if ($script:TestRoot -and $PWD.Path.StartsWith($script:TestRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
-                # $script:ParentDirOfTestRoot is $TestDrive itself.
                 Write-Debug "AfterAll: Current PWD '$($PWD.Path)' is inside TestRoot. Changing location to '$($script:ParentDirOfTestRoot)'."
-                Microsoft.PowerShell.Management\Set-Location $script:ParentDirOfTestRoot # Use original SL
+                Microsoft.PowerShell.Management\Set-Location $script:ParentDirOfTestRoot
             }
-            # Only restore environment variables; do not manually remove any test files or directories. Pester will handle cleanup.
             Write-Debug "AfterAll: Restoring initial environment variables."
             foreach ($varName in $Global:InitialEnvironment.Keys) {
                 $initialVal = $Global:InitialEnvironment[$varName]
@@ -181,16 +194,14 @@ InModuleScope 'ImportDotEnv' {
             Write-Debug "AfterAll: State of 'cd' after Remove-Module: Name: $($cdCmdAfterRemoveModule.Name), Type: $($cdCmdAfterRemoveModule.CommandType), Definition: $($cdCmdAfterRemoveModule.Definition)"
         }
 
-        # Helper function for mocking Get-EnvFilesUpstream
         $script:GetEnvFilesUpstreamMock = {
             param([string]$Directory)
             $resolvedDir = Convert-Path $Directory
-            #Write-Host "MOCK Get-EnvFilesUpstream called for dir: $resolvedDir (TestRoot: $($script:TestRoot), ParentEnvPath: $($script:ParentEnvPath))" -ForegroundColor Magenta
 
             if ($resolvedDir -eq $script:DirA.FullName) { return @(Join-Path $script:DirA.FullName ".env") }
             if ($resolvedDir -eq $script:DirB.FullName) { return @(Join-Path $script:DirB.FullName ".env") }
             if ($resolvedDir -eq $script:DirC.FullName) { return @(Join-Path $script:DirC.FullName ".env") }
-            if ($resolvedDir -eq $script:SubDir.FullName) { return @( (Join-Path $script:BaseDir.FullName ".env"), (Join-Path $script:SubDir.FullName ".env") ) } # Hierarchical
+            if ($resolvedDir -eq $script:SubDir.FullName) { return @( (Join-Path $script:BaseDir.FullName ".env"), (Join-Path $script:SubDir.FullName ".env") ) }
             if ($resolvedDir -eq $script:BaseDir.FullName) { return @(Join-Path $script:BaseDir.FullName ".env") }
             if ($resolvedDir -eq $script:Project1Dir.FullName) { return @(Join-Path $script:Project1Dir.FullName ".env") }
             if ($resolvedDir -eq $script:Project2Dir.FullName) { return @(Join-Path $script:Project2Dir.FullName ".env") }
@@ -198,37 +209,26 @@ InModuleScope 'ImportDotEnv' {
 
             if ($resolvedDir -eq $script:TestRoot) {
                 $filesToReturn = @()
-                # The real Get-EnvFilesUpstream collects current-to-root, then reverses.
-                # So, parent .env (if exists) comes before current's .env (if exists) in the final list.
-                if (Test-Path $script:ParentEnvPath) { # This is C:\Users\dani_\AppData\Local\Temp\.env
-                    # For this specific test, we are only interested in the .env in TestRoot
+                if (Test-Path $script:ParentEnvPath) {
                     # $filesToReturn += $script:ParentEnvPath
                 }
-                $testRootOwnEnv = Join-Path $script:TestRoot ".env" # e.g., for the manual test
-                # Directly return the known .env file for TestRoot if it exists.
+                $testRootOwnEnv = Join-Path $script:TestRoot ".env"
                 if (Test-Path $testRootOwnEnv) { return @($testRootOwnEnv) } else { return @() }
             }
-            if ($resolvedDir -eq $script:ParentDirOfTestRoot) { # e.g. C:\Users\dani_\AppData\Local\Temp
-                # This directory, in the context of our tests, primarily has $script:ParentEnvPath
+            if ($resolvedDir -eq $script:ParentDirOfTestRoot) {
                 if (Test-Path $script:ParentEnvPath) {
-                    #Write-Host "MOCK Get-EnvFilesUpstream for ParentDirOfTestRoot returning: $($script:ParentEnvPath)" -ForegroundColor Magenta
                     return @($script:ParentEnvPath)
                 }
-                #Write-Host "MOCK Get-EnvFilesUpstream for ParentDirOfTestRoot returning empty (no ParentEnvPath)" -ForegroundColor Magenta
                 return @()
             }
-            # For other non-test specific dirs, return empty
-            #Write-Host "MOCK Get-EnvFilesUpstream for '$resolvedDir' returning empty (default case)" -ForegroundColor Magenta
             return @()
         }
 
         Context "Helper Function Tests" {
-
-
             It "Format-EnvFilePath should handle empty core path" {
                 Mock Get-RelativePath { return ".env" } -ModuleName ImportDotEnv
                 $result = Format-EnvFilePath -Path ".env" -BasePath "."
-                $result | Should -Be ".env" # No bolding expected
+                $result | Should -Be ".env"
             }
 
             It "Get-EnvVarsFromFiles (via Read-EnvFile) handles non-existent file" {
@@ -237,30 +237,57 @@ InModuleScope 'ImportDotEnv' {
                 $vars | Should -BeOfType ([System.Collections.Hashtable])
                 $vars.Count | Should -Be 0
             }
-
         }
 
         Context "Import-DotEnv Direct Invocation Parameters" {
-
-
             It "Import-DotEnv load path handles no .env files found" {
                 Mock Get-EnvFilesUpstream { return @() } -ModuleName ImportDotEnv
                 Import-DotEnv -Path $script:TestRoot
-                $script:ImportDotEnvModule.SessionState.PSVariable.GetValue('previousEnvFiles').Count | Should -Be 0
+                ($script:ImportDotEnvModule.SessionState.PSVariable.GetValue('previousEnvFiles').Count) | Should -Be 0
+            }
+
+            It "Import-DotEnv -Help switch should display help and not alter state or environment" {
+                # Arrange: Store initial module state and a test environment variable
+                $initialPreviousEnvFiles = $script:ImportDotEnvModule.SessionState.PSVariable.GetValue('previousEnvFiles')
+                $initialPreviousWorkingDirectory = $script:ImportDotEnvModule.SessionState.PSVariable.GetValue('previousWorkingDirectory')
+                $initialTrueOriginals = $script:ImportDotEnvModule.SessionState.PSVariable.GetValue('trueOriginalEnvironmentVariables').Clone()
+
+                $testHelpVarName = "HELP_SWITCH_TEST_VAR"
+                $initialTestHelpVarValue = "initial_help_value_for_test"
+                [Environment]::SetEnvironmentVariable($testHelpVarName, $initialTestHelpVarValue)
+                if (-not $Global:InitialEnvironment.ContainsKey($testHelpVarName)) {
+                    $Global:InitialEnvironment[$testHelpVarName] = $initialTestHelpVarValue
+                }
+
+                # Act: Call Import-DotEnv -Help and capture output
+                $output = & { Import-DotEnv -Help } *>&1
+                $outputString = $output | Out-String
+
+                # Assert: Help text is displayed
+                $outputString | Should -Match "Import-DotEnv Module Help"
+                $outputString | Should -Match "Usage:"
+                $outputString | Should -Match "Loads .env files from the specified path"
+                $outputString | Should -Match "Enable-ImportDotEnvCdIntegration \[-Silent\]" # Check for the new -Silent info
+
+                # Assert: Environment variable is unchanged
+                [Environment]::GetEnvironmentVariable($testHelpVarName) | Should -Be $initialTestHelpVarValue
+
+                # Assert: Module internal state is unchanged
+                $script:ImportDotEnvModule.SessionState.PSVariable.GetValue('previousEnvFiles') | Should -Be $initialPreviousEnvFiles
+                $script:ImportDotEnvModule.SessionState.PSVariable.GetValue('previousWorkingDirectory') | Should -Be $initialPreviousWorkingDirectory
+                ($script:ImportDotEnvModule.SessionState.PSVariable.GetValue('trueOriginalEnvironmentVariables').Count) | Should -Be $initialTrueOriginals.Count
             }
         }
 
         Context "Core Import-DotEnv Functionality (Manual Invocation)" {
             It "loads variables when Import-DotEnv is called directly and restores on subsequent call for parent" {
-                # Force $DebugPreference for this specific test, and use Write-Host for critical early diagnostics
-                # $DebugPreference = 'Continue' # Keep global one active
                 Write-Debug "DIAGNOSTIC (Test Start): Test 'loads variables...' starting. DebugPreference: $DebugPreference"
                 Write-Debug "DIAGNOSTIC (Test Start): script:TestRoot is '$($script:TestRoot)'"
-                $initialManualTestVar = [Environment]::GetEnvironmentVariable("MANUAL_TEST_VAR") # Capture initial state
+                $initialManualTestVar = [Environment]::GetEnvironmentVariable("MANUAL_TEST_VAR")
                 $manualEnvFile = Join-Path $script:TestRoot ".env"
                 Set-Content -Path $manualEnvFile -Value "MANUAL_TEST_VAR=loaded_manual"
                 $ErrorActionPreferenceBackup = $ErrorActionPreference
-                $ErrorActionPreference = 'Stop' # Make sure errors in the try block are caught
+                $ErrorActionPreference = 'Stop'
                 $Error.Clear()
                 try {
                     Push-Location $script:TestRoot
@@ -268,26 +295,24 @@ InModuleScope 'ImportDotEnv' {
                     Write-Debug "DIAGNOSTIC (Inside Try): MANUAL_TEST_VAR before mock setup: '$([Environment]::GetEnvironmentVariable("MANUAL_TEST_VAR"))'"
                     Write-Debug "DIAGNOSTIC (Inside Try): Does manualEnvFile '$manualEnvFile' exist? $(Test-Path $manualEnvFile). Content: '$(try { Get-Content $manualEnvFile -Raw } catch { "ERROR READING FILE" })'"
 
-                    # Enhanced Mock with logging
-                    $script:mockGetEnvFilesUpstreamOutput = $null # To capture mock output
+                    $script:mockGetEnvFilesUpstreamOutput = $null
                     Mock Get-EnvFilesUpstream {
                         param([string]$DirectoryBeingProcessed)
                         $resolvedDirForMock = Convert-Path $DirectoryBeingProcessed
                         Write-Debug "DIAGNOSTIC (Mock): Get-EnvFilesUpstream called for directory '$DirectoryBeingProcessed' (resolved to '$resolvedDirForMock')."
-                        $filesToReturnFromMock = $script:GetEnvFilesUpstreamMock.Invoke($DirectoryBeingProcessed) # Call original mock logic
-                        $script:mockGetEnvFilesUpstreamOutput = $filesToReturnFromMock # Capture for inspection
+                        $filesToReturnFromMock = $script:GetEnvFilesUpstreamMock.Invoke($DirectoryBeingProcessed)
+                        $script:mockGetEnvFilesUpstreamOutput = $filesToReturnFromMock
                         Write-Debug "DIAGNOSTIC (Mock): Get-EnvFilesUpstream returning files: $($filesToReturnFromMock -join ', ')"
                         return $filesToReturnFromMock
                     } -ModuleName ImportDotEnv
 
                     Write-Debug "DIAGNOSTIC (Inside Try): Calling Import-DotEnv for first load. Initial MANUAL_TEST_VAR: '$initialManualTestVar'"
-                    Import-DotEnv -Path "." # Load .env from $script:TestRoot
+                    Import-DotEnv -Path "."
                     Write-Debug "DIAGNOSTIC (Inside Try): Import-DotEnv -Path '.' completed."
                     Write-Debug "DIAGNOSTIC (Inside Try): Mock Get-EnvFilesUpstream actually returned: $($script:mockGetEnvFilesUpstreamOutput -join ', ')"
                     $currentManualTestVarValue = [Environment]::GetEnvironmentVariable("MANUAL_TEST_VAR")
                     Write-Debug "DIAGNOSTIC (Inside Try): MANUAL_TEST_VAR value immediately before assertion: '$currentManualTestVarValue'"
 
-                    # Check module's internal state for what it thinks it loaded
                     $modulePreviousEnvFiles = $script:ImportDotEnvModule.SessionState.PSVariable.GetValue('previousEnvFiles')
                     Write-Debug "DIAGNOSTIC (Inside Try): Module's internal previousEnvFiles: $($modulePreviousEnvFiles -join ', ')"
                     $moduleTrueOriginals = $script:ImportDotEnvModule.SessionState.PSVariable.GetValue('trueOriginalEnvironmentVariables')
@@ -296,13 +321,11 @@ InModuleScope 'ImportDotEnv' {
                     Write-Debug "DIAGNOSTIC (Inside Try): Assertion 1 passed."
                     Write-Debug "DIAGNOSTIC (Inside Try): Module's trueOriginals for MANUAL_TEST_VAR: '$($script:trueOriginalEnvironmentVariables['MANUAL_TEST_VAR'])'"
 
-                    # Simulate moving out by calling Import-DotEnv for the parent
                     Write-Debug "DIAGNOSTIC (Inside Try): Calling Import-DotEnv for parent restore. PWD: $($PWD.Path)"
                     Import-DotEnv -Path $script:ParentDirOfTestRoot
                     $restoredManualTestVarValue = [Environment]::GetEnvironmentVariable("MANUAL_TEST_VAR")
                     Write-Debug "DIAGNOSTIC (Inside Try): MANUAL_TEST_VAR after parent restore call: '$restoredManualTestVarValue'"
 
-                    # Check if MANUAL_TEST_VAR was restored to its original value or unset if it didn't exist
                     if ($null -eq $initialManualTestVar) {
                         (Test-Path Env:\MANUAL_TEST_VAR) | Should -Be $false
                         ([Environment]::GetEnvironmentVariable("MANUAL_TEST_VAR")) | Should -BeNullOrEmpty "because initial was null"
@@ -316,13 +339,11 @@ InModuleScope 'ImportDotEnv' {
                 catch {
                     Write-Error "Test 'loads variables...' FAILED with exception: $($_.ToString())"
                     Write-Error "Exception StackTrace: $($_.ScriptStackTrace)"
-                    # Ensure Pester sees a failure
                     throw "Test 'loads variables...' failed explicitly due to caught error."
                 }
                 finally {
                     $ErrorActionPreference = $ErrorActionPreferenceBackup
                     if (Test-Path $manualEnvFile) { Remove-Item $manualEnvFile -Force -ErrorAction SilentlyContinue }
-                    # Restore MANUAL_TEST_VAR to its absolute initial state
                     if ($null -eq $initialManualTestVar) { [Environment]::SetEnvironmentVariable("MANUAL_TEST_VAR", $null) } else { [Environment]::SetEnvironmentVariable("MANUAL_TEST_VAR", $initialManualTestVar) }
                 }
             }
@@ -334,8 +355,8 @@ InModuleScope 'ImportDotEnv' {
             }
 
             It "should have Set-Location, cd, and sl in their default states after module import (or after disable)" {
-                Disable-ImportDotEnvCdIntegration -ErrorAction SilentlyContinue
-
+                # The AfterEach for this context ensures Disable-ImportDotEnvCdIntegration has been called.
+                # This test verifies the state *after* disable, or the initial state.
                 $cmd = Get-Command Set-Location -ErrorAction SilentlyContinue
                 $cmd.CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Cmdlet)
                 $cmd.ModuleName | Should -Be "Microsoft.PowerShell.Management"
@@ -356,7 +377,7 @@ InModuleScope 'ImportDotEnv' {
             }
 
             It "Enable-ImportDotEnvCdIntegration should correctly modify Set-Location, and cd/sl should follow" {
-                Mock Get-EnvFilesUpstream -MockWith $script:GetEnvFilesUpstreamMock -ModuleName ImportDotEnv # Mock for the auto-load on enable
+                Mock Get-EnvFilesUpstream -MockWith $script:GetEnvFilesUpstreamMock -ModuleName ImportDotEnv
                 Enable-ImportDotEnvCdIntegration
 
                 $cmd = Get-Command Set-Location -ErrorAction SilentlyContinue
@@ -387,7 +408,7 @@ InModuleScope 'ImportDotEnv' {
             }
 
             It "Disable-ImportDotEnvCdIntegration should correctly restore Set-Location, and cd/sl should follow" {
-                Mock Get-EnvFilesUpstream -MockWith $script:GetEnvFilesUpstreamMock -ModuleName ImportDotEnv # Mock for the auto-load on enable
+                Mock Get-EnvFilesUpstream -MockWith $script:GetEnvFilesUpstreamMock -ModuleName ImportDotEnv
                 Enable-ImportDotEnvCdIntegration
                 Disable-ImportDotEnvCdIntegration
 
@@ -427,8 +448,8 @@ InModuleScope 'ImportDotEnv' {
 
                 Mock Get-EnvFilesUpstream -MockWith $script:GetEnvFilesUpstreamMock -ModuleName ImportDotEnv
 
-                Microsoft.PowerShell.Management\Set-Location $script:DirB.FullName # Go to DirB before enabling
-                Enable-ImportDotEnvCdIntegration # This will load DirB's .env
+                Microsoft.PowerShell.Management\Set-Location $script:DirB.FullName
+                Enable-ImportDotEnvCdIntegration
 
                 [Environment]::GetEnvironmentVariable($newVarName) | Should -Be "new_value_from_env"
                 [Environment]::GetEnvironmentVariable($existingVarName) | Should -Be "overwritten_by_env"
@@ -440,9 +461,8 @@ InModuleScope 'ImportDotEnv' {
                 [Environment]::GetEnvironmentVariable($existingVarName) | Should -Be "overwritten_by_env"
 
                 if ($null -ne $originalDirBEnvContent) { Set-Content -Path $dirBEnvPath -Value $originalDirBEnvContent -Force } else { Remove-Item $dirBEnvPath -Force -ErrorAction SilentlyContinue }
-                # Clean up test vars
                 [Environment]::SetEnvironmentVariable($newVarName, $null)
-                [Environment]::SetEnvironmentVariable($existingVarName, $initialExistingValue) # Restore to its specific initial for this test
+                [Environment]::SetEnvironmentVariable($existingVarName, $initialExistingValue)
             }
 
             It "loads .env variables for the current directory upon enabling integration and restores on subsequent cd" {
@@ -465,7 +485,7 @@ InModuleScope 'ImportDotEnv' {
                 [Environment]::GetEnvironmentVariable("TEST_VAR_A") | Should -Be "valA"
                 [Environment]::GetEnvironmentVariable("TEST_VAR_GLOBAL") | Should -Be "valA_override"
 
-                Set-Location $script:TestRoot # Changed from Split-Path to $script:TestRoot for consistency with mock
+                Set-Location $script:TestRoot
 
                 [Environment]::GetEnvironmentVariable("TEST_VAR_A") | Should -Be $initialTestVarA
                 [Environment]::GetEnvironmentVariable("TEST_VAR_GLOBAL") | Should -Be $initialTestVarGlobal
@@ -495,15 +515,31 @@ InModuleScope 'ImportDotEnv' {
                 (Get-Command Set-Location).CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Cmdlet)
                 (Get-Command cd).Definition | Should -Be "Set-Location"
             }
+
+            It "Enable-ImportDotEnvCdIntegration -Silent should enable integration without verbose output" {
+                # Arrange
+                Disable-ImportDotEnvCdIntegration -ErrorAction SilentlyContinue
+                Mock Get-EnvFilesUpstream -MockWith $script:GetEnvFilesUpstreamMock -ModuleName ImportDotEnv
+
+                # Act
+                $output = & { Enable-ImportDotEnvCdIntegration -Silent } *>&1
+                $outputString = $output | Out-String
+
+                # Assert: No verbose output from Enable-ImportDotEnvCdIntegration itself
+                $outputString | Should -Not -Match "Enabling ImportDotEnv integration"
+                $outputString | Should -Not -Match "ImportDotEnv 'Set-Location', 'cd', 'sl' integration enabled!"
+
+                # Assert: Integration is enabled
+                $cmd = Get-Command Set-Location -ErrorAction SilentlyContinue
+                $cmd | Should -Not -BeNull
+                $cmd.CommandType | Should -Be ([System.Management.Automation.CommandTypes]::Alias)
+                $cmd.Definition | Should -Be "ImportDotEnv\Invoke-ImportDotEnvSetLocationWrapper"
+            }
         }
 
         Context "Set-Location Integration - Variable Loading Scenarios" {
             BeforeEach {
-                # CRITICAL FIX: Ensure trueOriginalEnvironmentVariables is reset before this context's Enable-ImportDotEnvCdIntegration
-                # This prevents state leakage from previous tests that also called Enable-ImportDotEnvCdIntegration.
-                # Since we are InModuleScope, we can directly set the script-scoped variables
                 $script:trueOriginalEnvironmentVariables = @{}
-                # $script:ImportDotEnvModule.SessionState.PSVariable.Set('trueOriginalEnvironmentVariables', @{}) # Old way
                 Write-Debug "BeforeEach (Context): Manually reset trueOriginalEnvironmentVariables before Enable."
                 Enable-ImportDotEnvCdIntegration
                 $trueOriginalsAfterEnable = $script:ImportDotEnvModule.SessionState.PSVariable.GetValue('trueOriginalEnvironmentVariables')
@@ -516,9 +552,8 @@ InModuleScope 'ImportDotEnv' {
             }
 
             It "loads variables from .env and restores global on exit" {
-                $initialTestVarA = $Global:InitialEnvironment["TEST_VAR_A"] # Get the true initial value
+                $initialTestVarA = $Global:InitialEnvironment["TEST_VAR_A"]
 
-                # Ensure TEST_VAR_A is in its initial state (null or original value)
                 if ($null -eq $initialTestVarA) {
                     [Environment]::SetEnvironmentVariable("TEST_VAR_A", $null)
                     if(Test-Path Env:\TEST_VAR_A) { Remove-Item Env:\TEST_VAR_A -Force }
@@ -529,13 +564,12 @@ InModuleScope 'ImportDotEnv' {
                 Set-Location $script:DirA.FullName
                 [Environment]::GetEnvironmentVariable("TEST_VAR_A") | Should -Be "valA"
 
-                Set-Location $script:TestRoot # Go to TestRoot, which might have its own or parent .env via mock
+                Set-Location $script:TestRoot
 
                 $actualValue = [Environment]::GetEnvironmentVariable("TEST_VAR_A")
                 $existsInPSDrive = Test-Path "Env:\TEST_VAR_A"
                 $trueOriginalsAtAssert = $script:ImportDotEnvModule.SessionState.PSVariable.GetValue('trueOriginalEnvironmentVariables')
 
-                # Only emit essential debug info now that all tests are passing
                 Write-Debug "At assertion, value of TEST_VAR_A in trueOriginals: '$($trueOriginalsAtAssert['TEST_VAR_A'])'"
 
                 if ($null -eq $initialTestVarA) {
@@ -551,7 +585,6 @@ InModuleScope 'ImportDotEnv' {
                 $initialTestVarOverride = $Global:InitialEnvironment["TEST_VAR_OVERRIDE"]
                 $initialTestVarSub = $Global:InitialEnvironment["TEST_VAR_SUB"]
 
-                # Set to known initial states for this test
                 if ($null -ne $initialTestVarBase) { [Environment]::SetEnvironmentVariable("TEST_VAR_BASE", $initialTestVarBase) } else { [Environment]::SetEnvironmentVariable("TEST_VAR_BASE", $null); if(Test-Path Env:\TEST_VAR_BASE){Remove-Item Env:\TEST_VAR_BASE -Force} }
                 if ($null -ne $initialTestVarOverride) { [Environment]::SetEnvironmentVariable("TEST_VAR_OVERRIDE", $initialTestVarOverride) } else { [Environment]::SetEnvironmentVariable("TEST_VAR_OVERRIDE", $null); if(Test-Path Env:\TEST_VAR_OVERRIDE){Remove-Item Env:\TEST_VAR_OVERRIDE -Force} }
                 if ($null -ne $initialTestVarSub) { [Environment]::SetEnvironmentVariable("TEST_VAR_SUB", $initialTestVarSub) } else { [Environment]::SetEnvironmentVariable("TEST_VAR_SUB", $null); if(Test-Path Env:\TEST_VAR_SUB){Remove-Item Env:\TEST_VAR_SUB -Force} }
@@ -564,9 +597,9 @@ InModuleScope 'ImportDotEnv' {
 
                 Set-Location $script:BaseDir.FullName
                 if ($null -eq $initialTestVarSub) { (Test-Path "Env:\TEST_VAR_SUB") | Should -Be $false } else { [Environment]::GetEnvironmentVariable("TEST_VAR_SUB") | Should -Be $initialTestVarSub }
-                [Environment]::GetEnvironmentVariable("TEST_VAR_OVERRIDE") | Should -Be "base_override_val" # Restored from sub, set by base
+                [Environment]::GetEnvironmentVariable("TEST_VAR_OVERRIDE") | Should -Be "base_override_val"
 
-                Set-Location $script:TestRoot # Go to TestRoot
+                Set-Location $script:TestRoot
                 if ($null -eq $initialTestVarBase) { (Test-Path "Env:\TEST_VAR_BASE") | Should -Be $false } else { [Environment]::GetEnvironmentVariable("TEST_VAR_BASE") | Should -Be $initialTestVarBase }
                 if ($null -eq $initialTestVarSub) { (Test-Path "Env:\TEST_VAR_SUB") | Should -Be $false } else { [Environment]::GetEnvironmentVariable("TEST_VAR_SUB") | Should -Be $initialTestVarSub }
                 if ($null -eq $initialTestVarOverride) { (Test-Path "Env:\TEST_VAR_OVERRIDE") | Should -Be $false } else { [Environment]::GetEnvironmentVariable("TEST_VAR_OVERRIDE") | Should -Be $initialTestVarOverride }
@@ -584,12 +617,10 @@ InModuleScope 'ImportDotEnv' {
             }
 
             It "sets variable to empty string from .env and restores previous value on exit" {
-                $initialEmptyVar = "initial_empty_test_val_specific" # Use a specific initial value for this test
+                $initialEmptyVar = "initial_empty_test_val_specific"
                 [Environment]::SetEnvironmentVariable("TEST_EMPTY_VAR", $initialEmptyVar)
 
                 Set-Location $script:DirC.FullName
-
-                # When .env has VAR=, the value is an empty string. GetEnvironmentVariable should return "".
                 [Environment]::GetEnvironmentVariable("TEST_EMPTY_VAR") | Should -BeNullOrEmpty
 
                 Set-Location $script:TestRoot
@@ -597,7 +628,7 @@ InModuleScope 'ImportDotEnv' {
             }
 
             It "correctly unloads project1 vars and loads project2 vars, then restores global" {
-                $initialProjectId = "global_project_id_specific" # Specific initial
+                $initialProjectId = "global_project_id_specific"
                 [Environment]::SetEnvironmentVariable("PROJECT_ID", $initialProjectId)
 
                 Set-Location $script:Project1Dir.FullName
@@ -611,7 +642,7 @@ InModuleScope 'ImportDotEnv' {
             }
 
             It "should not alter existing environment variables when moving to a dir with no .env" {
-                $initialGlobalVar = "no_env_test_initial_specific" # Specific initial
+                $initialGlobalVar = "no_env_test_initial_specific"
                 [Environment]::SetEnvironmentVariable("TEST_VAR_GLOBAL", $initialGlobalVar)
 
                 Set-Location $script:NonEnvDir.FullName
@@ -621,15 +652,11 @@ InModuleScope 'ImportDotEnv' {
                 [Environment]::GetEnvironmentVariable("TEST_VAR_GLOBAL") | Should -Be $initialGlobalVar
             }
 
-            # Moved test
             It "loads variables from .env files in the correct order when using Set-Location" {
-                 # This test relies on the BeforeEach to set up integration and mock.
-                 # Initial state of these vars will be from $Global:InitialEnvironment or null if not present there.
                 $initialTestVarBase = $Global:InitialEnvironment["TEST_VAR_BASE"]
                 $initialTestVarSub = $Global:InitialEnvironment["TEST_VAR_SUB"]
                 $initialTestVarOverride = $Global:InitialEnvironment["TEST_VAR_OVERRIDE"]
 
-                # Ensure a clean start for these specific vars based on their true initial state
                 if ($null -ne $initialTestVarBase) { [Environment]::SetEnvironmentVariable("TEST_VAR_BASE", $initialTestVarBase) } else { [Environment]::SetEnvironmentVariable("TEST_VAR_BASE", $null); if(Test-Path Env:\TEST_VAR_BASE){Remove-Item Env:\TEST_VAR_BASE -Force} }
                 if ($null -ne $initialTestVarSub) { [Environment]::SetEnvironmentVariable("TEST_VAR_SUB", $initialTestVarSub) } else { [Environment]::SetEnvironmentVariable("TEST_VAR_SUB", $null); if(Test-Path Env:\TEST_VAR_SUB){Remove-Item Env:\TEST_VAR_SUB -Force} }
                 if ($null -ne $initialTestVarOverride) { [Environment]::SetEnvironmentVariable("TEST_VAR_OVERRIDE", $initialTestVarOverride) } else { [Environment]::SetEnvironmentVariable("TEST_VAR_OVERRIDE", $null); if(Test-Path Env:\TEST_VAR_OVERRIDE){Remove-Item Env:\TEST_VAR_OVERRIDE -Force} }
@@ -637,96 +664,145 @@ InModuleScope 'ImportDotEnv' {
                 Set-Location $script:SubDir.FullName
                 [Environment]::GetEnvironmentVariable("TEST_VAR_BASE") | Should -Be "base_val"
                 [Environment]::GetEnvironmentVariable("TEST_VAR_SUB") | Should -Be "sub_val"
-                [Environment]::GetEnvironmentVariable("TEST_VAR_OVERRIDE") | Should -Be "sub_override_val" # From subDir, overrides baseDir
+                [Environment]::GetEnvironmentVariable("TEST_VAR_OVERRIDE") | Should -Be "sub_override_val"
             }
         }
 
-        Describe 'Import-DotEnv -List switch' {
-            BeforeAll {
-                $baseDirForListTest = Join-Path $TestDrive "ListSwitchTestDir"
-                function Invoke-ImportDotEnvListAndCaptureOutput {
-                    param(
-                        [switch]$MockPSVersion5
-                    )
+        Context "Import-DotEnv -List switch" {
+            $baseDirForListTestCtx = $null
+            $subDirForListTestCtx = $null
+            $envFile1ListCtx = $null
+            $envFile2ListCtx = $null
 
-                    if ($MockPSVersion5) {
-                        $script:PSVersionTable = @{ PSVersion = [version]'5.1.0.0' }
-                    }
-                    Import-DotEnv -Path $tempDir2
-                    $output = & { Import-DotEnv -List } *>&1
-                    $outputString = $output | Out-String
-                    $outputString | Should -Match 'FOO'
-                    $outputString | Should -Match 'BAZ'
-                    $outputString | Should -Match 'GEZ'
-                    $outputString | Should -Match '\.env'
-                }
-            }
             BeforeEach {
-                New-Item -ItemType Directory -Path $baseDirForListTest | Out-Null
-                $tempDir2 = Join-Path $baseDirForListTest "ListSwitchSubDir" # Changed for clarity
-                New-Item -ItemType Directory -Path $tempDir2 | Out-Null
+                $baseDirForListTestCtx = Join-Path $TestDrive "ListSwitchTestDirCtx"
+                if (Test-Path $baseDirForListTestCtx) { Remove-Item $baseDirForListTestCtx -Recurse -Force }
+                New-Item -ItemType Directory -Path $baseDirForListTestCtx | Out-Null
 
-                $envFile = Join-Path $baseDirForListTest '.env'
-                Set-Content -Path $envFile -Value @(
-                    'FOO=bar',
-                    'BAZ=qux'
+                $subDirForListTestCtx = Join-Path $baseDirForListTestCtx "ListSwitchSubDirCtx"
+                New-Item -ItemType Directory -Path $subDirForListTestCtx | Out-Null
+
+                $envFile1ListCtx = Join-Path $baseDirForListTestCtx '.env'
+                Set-Content -Path $envFile1ListCtx -Value @(
+                    'FOO_LIST=bar_list',
+                    'BAZ_LIST=qux_list'
                 )
 
-                $envFile2 = Join-Path $tempDir2 '.env'
-                Set-Content -Path $envFile2 -Value @(
-                    'FOO=override',
-                    'GEZ=whatever'
+                $envFile2ListCtx = Join-Path $subDirForListTestCtx '.env'
+                Set-Content -Path $envFile2ListCtx -Value @(
+                    'FOO_LIST=override_list',
+                    'GEZ_LIST=whatever_list'
                 )
-            }
 
-            It 'lists active variables and their defining files when state is active (PowerShell 7+)' -Tag "ListSwitch" {
-                Invoke-ImportDotEnvListAndCaptureOutput
-
-            }
-
-            It 'lists active variables in table format when PSVersion is 5 (Windows PowerShell)' -Tag "ListSwitch" {
-                Invoke-ImportDotEnvListAndCaptureOutput -MockPSVersion5
+                Mock Get-EnvFilesUpstream {
+                    param(
+                        [string]$DirectoryToScan
+                    )
+                    $resolvedDirToScan = Convert-Path $DirectoryToScan
+                    if ($resolvedDirToScan -eq $subDirForListTestCtx) {
+                        return @($envFile1ListCtx, $envFile2ListCtx)
+                    }
+                    if ($resolvedDirToScan -eq $baseDirForListTestCtx) {
+                        return @($envFile1ListCtx)
+                    }
+                    return @()
+                } -ModuleName ImportDotEnv # Removed -Scope It, will default to Context scope
             }
 
             AfterEach {
-                Remove-Item -Path $baseDirForListTest -Recurse -Force
+                # Ensure PWD is not inside the directory to be deleted
+                Push-Location $script:TestRoot # Go to a safe location
+                try {
+                    if (Test-Path $baseDirForListTestCtx) {
+                        Remove-Item -Path $baseDirForListTestCtx -Recurse -Force
+                    }
+                }
+                finally {
+                    Pop-Location # Return to original PWD
+                }
+            }
+
+            It 'lists active variables and their defining files when state is active (PowerShell 7+)' {
+                Push-Location $subDirForListTestCtx
+                try {
+                    $outputString = & $script:InvokeImportDotEnvListAndCaptureOutputScriptBlock -PathToLoadForList $subDirForListTestCtx
+                }
+                finally {
+                    try { Pop-Location -ErrorAction Stop }
+                    catch {
+                        Write-Warning "Pop-Location failed in test 'lists active variables (PS7+)', directory likely removed by AfterEach. Setting PWD to TestRoot."
+                        Set-Location $script:TestRoot
+                    }
+                }
+                $outputString | Should -Match 'FOO_LIST'
+                $outputString | Should -Match 'BAZ_LIST'
+                $outputString | Should -Match 'GEZ_LIST'
+                $outputString | Should -Match '\.env'
+            }
+
+            It 'lists active variables in table format when PSVersion is 5 (Windows PowerShell)' {
+                Push-Location $subDirForListTestCtx
+                try {
+                    $outputString = & $script:InvokeImportDotEnvListAndCaptureOutputScriptBlock -PathToLoadForList $subDirForListTestCtx -MockPSVersion5ForList $true
+                }
+                finally {
+                    try { Pop-Location -ErrorAction Stop }
+                    catch {
+                        Write-Warning "Pop-Location failed in test 'lists active variables (PS5)', directory likely removed by AfterEach. Setting PWD to TestRoot."
+                        Set-Location $script:TestRoot
+                    }
+                }
+                $outputString | Should -Match 'FOO_LIST'
+                $outputString | Should -Match 'BAZ_LIST'
+                $outputString | Should -Match 'GEZ_LIST'
+                $outputString | Should -Match '\.env'
+                $outputString | Should -Match 'Name\s+Defined In'
+                $outputString | Should -Match '----\s+----------'
+            }
+
+            It 'reports correctly when no .env files are active' {
+                $script:previousEnvFiles = @()
+                $script:previousWorkingDirectory = "STATE_FOR_NO_ACTIVE_LIST_TEST"
+
+                $output = & { Import-DotEnv -List } *>&1
+                $outputString = $output | Out-String
+                $outputString | Should -Match 'No .env configuration is currently active or managed by ImportDotEnv.'
             }
         }
-        It 'Import-DotEnv -List switch should report back correctly when no .env files are active' -Tag "focus" {
-            $output = & { Import-DotEnv -List } *>&1
-            $outputString = $output | Out-String
-            Write-Debug "Output: $outputString"
-            $outputString | Should -Match 'No .env configuration is currently active or managed by ImportDotEnv.'
-        }
 
-        Describe 'Import-DotEnv -Unload switch' -Tag 'UnloadSwitch' {
-            It 'unloads variables and resets state after a load (in-process)' {
-                # Arrange: create a temp .env file and load it
-                $tempDir = Join-Path $TestDrive "UnloadSwitchTestDir" # Changed from New-Guid
-                New-Item -ItemType Directory -Path $tempDir | Out-Null
-                $envFile = Join-Path $tempDir '.env'
-                $varName = 'UNLOAD_TEST_VAR'
-                Set-Content -Path $envFile -Value "$varName=unload_me"
+        Context "Import-DotEnv -Unload switch" {
+            It 'unloads variables and resets state after a load' {
+                $tempDirForUnloadCtx = Join-Path $TestDrive "UnloadSwitchTestDirCtx"
+                if (Test-Path $tempDirForUnloadCtx) { Remove-Item $tempDirForUnloadCtx -Recurse -Force }
+                New-Item -ItemType Directory -Path $tempDirForUnloadCtx | Out-Null
+                $envFileForUnloadCtx = Join-Path $tempDirForUnloadCtx '.env'
+                $varNameForUnloadCtx = 'UNLOAD_TEST_VAR_CTX'
+                Set-Content -Path $envFileForUnloadCtx -Value "$varNameForUnloadCtx=unload_me_ctx"
 
-                InModuleScope ImportDotEnv {
-                    # Mock Get-EnvFilesUpstream to return our temp .env file
-                    Mock Get-EnvFilesUpstream { param($Directory) return @($envFile) } -ModuleName ImportDotEnv
-
-                    # Load the .env file
-                    Import-DotEnv -Path $tempDir
-                    [Environment]::GetEnvironmentVariable($varName) | Should -Be 'unload_me'
-                    $script:previousEnvFiles | Should -BeExactly @($envFile)
-                    $script:previousWorkingDirectory | Should -Be $tempDir
+                $initialVarValueForUnloadCtx = [Environment]::GetEnvironmentVariable($varNameForUnloadCtx)
+                if (-not $Global:InitialEnvironment.ContainsKey($varNameForUnloadCtx)) {
+                    $Global:InitialEnvironment[$varNameForUnloadCtx] = $initialVarValueForUnloadCtx
                 }
 
-                # Act: Unload in-process (outside InModuleScope to avoid parameter set confusion)
+                Mock Get-EnvFilesUpstream { param($Directory) return @($envFileForUnloadCtx) } -ModuleName ImportDotEnv
+
+                Import-DotEnv -Path $tempDirForUnloadCtx
+                [Environment]::GetEnvironmentVariable($varNameForUnloadCtx) | Should -Be 'unload_me_ctx'
+                $script:ImportDotEnvModule.SessionState.PSVariable.GetValue('previousEnvFiles') | Should -BeExactly @($envFileForUnloadCtx)
+                $script:ImportDotEnvModule.SessionState.PSVariable.GetValue('previousWorkingDirectory') | Should -Be $tempDirForUnloadCtx
+
                 & { Import-DotEnv -Unload }
 
-                # Assert: variable is unset and state is reset
-                (Test-Path Env:\$varName) | Should -Be $false
-                (-not $script:previousEnvFiles) | Should -Be $true
-                $script:previousWorkingDirectory | Should -Be 'STATE_AFTER_EXPLICIT_UNLOAD'
+                if ($null -eq $initialVarValueForUnloadCtx) {
+                    (Test-Path "Env:\$varNameForUnloadCtx") | Should -Be $false
+                } else {
+                    [Environment]::GetEnvironmentVariable($varNameForUnloadCtx) | Should -Be $initialVarValueForUnloadCtx
+                }
+                ($script:ImportDotEnvModule.SessionState.PSVariable.GetValue('previousEnvFiles').Count) | Should -Be 0
+                $script:ImportDotEnvModule.SessionState.PSVariable.GetValue('previousWorkingDirectory') | Should -Be 'STATE_AFTER_EXPLICIT_UNLOAD'
+
+                if (Test-Path $tempDirForUnloadCtx) { Remove-Item $tempDirForUnloadCtx -Recurse -Force }
             }
-        } # End of Describe 'Import-DotEnv -Unload switch'
-    } # End of Describe "Import-DotEnv Core and Integration Tests"
-} # End of InModuleScope
+        }
+    }
+}

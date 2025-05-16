@@ -398,7 +398,7 @@ manage environment variables as you navigate directories.
   `e[1mImport-DotEnv -Help`e[0m
     Displays this help message.
 
-For `Set-Location` integration, use `Enable-ImportDotEnvCdIntegration` and `Disable-ImportDotEnvCdIntegration`.
+For `Set-Location` integration, use `Enable-ImportDotEnvCdIntegration [-Silent]` and `Disable-ImportDotEnvCdIntegration`.
 "@
     return
   }
@@ -651,7 +651,10 @@ function Invoke-ImportDotEnvSetLocationWrapper {
 
 function Enable-ImportDotEnvCdIntegration {
   [CmdletBinding()]
-  param()
+  param(
+    [Parameter()]
+    [switch]$Silent
+  )
   $currentModuleForEnable = $MyInvocation.MyCommand.Module
   if (-not $currentModuleForEnable) {
     Write-Error "Enable-ImportDotEnvCdIntegration: Module context not found." -ErrorAction Stop
@@ -660,7 +663,9 @@ function Enable-ImportDotEnvCdIntegration {
     Write-Error "Enable-ImportDotEnvCdIntegration: Required wrapper 'Invoke-ImportDotEnvSetLocationWrapper' is not exported." -ErrorAction Stop
   }
 
-  Write-Host "Enabling ImportDotEnv integration for 'Set-Location', 'cd', and 'sl' commands..." -ForegroundColor Yellow
+  if (-not $Silent) {
+    Write-Host "Enabling ImportDotEnv integration for 'Set-Location', 'cd', and 'sl' commands..." -ForegroundColor Yellow
+  }
   $wrapperFunctionFullName = "$($currentModuleForEnable.Name)\Invoke-ImportDotEnvSetLocationWrapper"
   $existingSetLocation = Get-Command Set-Location -ErrorAction SilentlyContinue
   if ($existingSetLocation -and $existingSetLocation.CommandType -eq [System.Management.Automation.CommandTypes]::Alias) {
@@ -669,8 +674,10 @@ function Enable-ImportDotEnvCdIntegration {
     }
   }
   Set-Alias -Name Set-Location -Value $wrapperFunctionFullName -Scope Global -Force -Option ReadOnly,AllScope
-  Import-DotEnv -Path $PWD.Path
-  Write-Host "ImportDotEnv 'Set-Location', 'cd', 'sl' integration enabled!" -ForegroundColor Green
+  Import-DotEnv -Path $PWD.Path # Note: Output from this Import-DotEnv call itself is not affected by the -Silent switch here.
+  if (-not $Silent) {
+    Write-Host "ImportDotEnv 'Set-Location', 'cd', 'sl' integration enabled!" -ForegroundColor Green
+  }
 }
 
 function Disable-ImportDotEnvCdIntegration {
