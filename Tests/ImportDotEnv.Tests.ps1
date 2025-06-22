@@ -712,6 +712,26 @@ InModuleScope 'ImportDotEnv' {
             $envFile1ListCtx = $null
             $envFile2ListCtx = $null
 
+            BeforeAll {
+                function New-LineBreakTolerantRegex {
+                    param([string]$VarName)
+                    # Each character, allow for any whitespace (including newlines) between
+                    return ($VarName.ToCharArray() | ForEach-Object { [Regex]::Escape($_) + '\s*' }) -join ''
+                }
+
+                function New-LineBreakTolerantHeaderRegex {
+                    param([string]$Header)
+                    # Each character, allow for any whitespace (including newlines) between
+                    return ($Header.ToCharArray() | ForEach-Object { [Regex]::Escape($_) + '\s*' }) -join ''
+                }
+
+                function Strip-AnsiEscapeSequences {
+                    param([string]$Text)
+                    # Regex to match ANSI escape sequences (including OSC 8 hyperlinks)
+                    return ($Text -replace "`e\\[[\\d;]*[A-Za-z]", '') -replace "`e\\]8;;.*?`e\\\\", ''
+                }
+            }
+
             BeforeEach {
                 $baseDirForListTestCtx = Join-Path $TestDrive "ListSwitchTestDirCtx"
                 if (Test-Path $baseDirForListTestCtx) { Remove-Item $baseDirForListTestCtx -Recurse -Force }
@@ -772,9 +792,9 @@ InModuleScope 'ImportDotEnv' {
                         Set-Location $script:TestRoot
                     }
                 }
-                $outputString | Should -Match 'FOO_LIST'
-                $outputString | Should -Match 'BAZ_LIST'
-                $outputString | Should -Match 'GEZ_LIST'
+                $outputString | Should -Match (New-LineBreakTolerantRegex 'FOO_LIST')
+                $outputString | Should -Match (New-LineBreakTolerantRegex 'BAZ_LIST')
+                $outputString | Should -Match (New-LineBreakTolerantRegex 'GEZ_LIST')
                 $outputString | Should -Match '\.env'
             }
 
@@ -790,12 +810,15 @@ InModuleScope 'ImportDotEnv' {
                         Set-Location $script:TestRoot
                     }
                 }
-                $outputString | Should -Match 'FOO_LIST'
-                $outputString | Should -Match 'BAZ_LIST'
-                $outputString | Should -Match 'GEZ_LIST'
+                $outputString | Should -Match (New-LineBreakTolerantRegex 'FOO_LIST')
+                $outputString | Should -Match (New-LineBreakTolerantRegex 'BAZ_LIST')
+                $outputString | Should -Match (New-LineBreakTolerantRegex 'GEZ_LIST')
                 $outputString | Should -Match '\.env'
-                $outputString | Should -Match 'Name\s+Defined In'
-                $outputString | Should -Match '----\s+----------'
+                # Strip ANSI before header/underline assertions
+                $cleanOutput = Strip-AnsiEscapeSequences $outputString
+                $cleanOutput | Should -Match (New-LineBreakTolerantHeaderRegex 'Name')
+                $cleanOutput | Should -Match (New-LineBreakTolerantHeaderRegex 'Defined In')
+                $cleanOutput | Should -Match '----\s+----------'
             }
 
             It 'reports correctly when no .env files are active' {
